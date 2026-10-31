@@ -1,4 +1,4 @@
-import type { BubbleShape } from './settings'
+import type { BubbleShape, ClickEffect } from './settings'
 
 export interface BubbleLayout {
   /** Center of the bubble as a fraction of canvas width / height. */
@@ -17,6 +17,11 @@ export interface Stroke {
 export const BUBBLE_SIZES = [0.22, 0.34, 0.5]
 const STROKE_HOLD_MS = 2500
 const STROKE_FADE_MS = 800
+/** How long a click zoom / spotlight stays before easing back out. */
+const EFFECT_HOLD_MS = 3500
+const RIPPLE_MS = 700
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 // A worker-driven ticker keeps drawing at full rate while the tab is hidden
 // (requestAnimationFrame and main-thread timers are throttled in background tabs).
@@ -64,6 +69,15 @@ export class Compositor {
   /** When false the camera is shown in a floating window instead of being drawn into the video. */
   drawBubble = true
   strokes: Stroke[] = []
+  clickEffect: ClickEffect = 'zoom'
+  zoomLevel = 2
+
+  private zoom = { x: 0.5, y: 0.5, s: 1 }
+  private zoomTarget = { x: 0.5, y: 0.5, s: 1 }
+  private zoomUntil = 0
+  private spot = { x: 0.5, y: 0.5, alpha: 0, until: 0 }
+  private ripples: { x: number; y: number; t: number }[] = []
+  private lastFrame = 0
 
   constructor(width: number, height: number) {
     this.canvas = document.createElement('canvas')
@@ -118,26 +132,129 @@ export class Compositor {
     this.setCamera(null)
   }
 
+  /** Reacts to a click at a point of the displayed frame (0..1): ripple, plus zoom or spotlight. */
+  click(nx: number, ny: number) {
+    if (this.clickEffect === 'off') return
+    const p = this.toSource(nx, ny)
+    const now = performance.now()
+    this.ripples.push({ ...p, t: now })
+    if (this.clickEffect === 'zoom') {
+      this.zoomTarget = { x: p.x, y: p.y, s: this.zoomLevel }
+      this.zoomUntil = now + EFFECT_HOLD_MS
+    } else if (this.clickEffect === 'spotlight') {
+      this.spot.x = p.x
+      this.spot.y = p.y
+      this.spot.until = now + EFFECT_HOLD_MS
+    }
+  }
+
+  resetEffects() {
+    this.zoomUntil = 0
+    this.spot.until = 0
+  }
+
+  /** The part of the frame currently shown, as origin + scale. */
+  private view() {
+    const s = this.zoom.s
+    const max = 1 - 1 / s
+    return { s, x0: clamp(this.zoom.x - 0.5 / s, 0, max), y0: clamp(this.zoom.y - 0.5 / s, 0, max) }
+  }
+
+  private toSource(nx: number, ny: number) {
+    const v = this.view()
+    return { x: v.x0 + nx / v.s, y: v.y0 + ny / v.s }
+  }
+
+  private toView(p: { x: number; y: number }) {
+    const v = this.view()
+    return { x: (p.x - v.x0) * v.s * this.width, y: (p.y - v.y0) * v.s * this.height }
+  }
+
+  private updateEffects(now: number) {
+    const dt = this.lastFrame ? Math.min(100, now - this.lastFrame) : 16
+    this.lastFrame = now
+    if (now > this.zoomUntil) this.zoomTarget.s = 1
+    const k = 1 - Math.exp(-dt / 160)
+    this.zoom.s += (this.zoomTarget.s - this.zoom.s) * k
+    this.zoom.x += (this.zoomTarget.x - this.zoom.x) * k
+    this.zoom.y += (this.zoomTarget.y - this.zoom.y) * k
+    if (this.zoomTarget.s === 1 && this.zoom.s < 1.002) this.zoom.s = 1
+    this.spot.alpha += ((now < this.spot.until ? 1 : 0) - this.spot.alpha) * k
+    this.ripples = this.ripples.filter((r) => now - r.t < RIPPLE_MS)
+  }
+
   private draw() {
     const { ctx, canvas } = this
     const W = canvas.width
     const H = canvas.height
+    const now = performance.now()
+    this.updateEffects(now)
     ctx.fillStyle = '#0b0b0d'
     ctx.fillRect(0, 0, W, H)
 
+    const { s, x0, y0 } = this.view()
+    ctx.save()
+    ctx.scale(s, s)
+    ctx.translate(-x0 * W, -y0 * H)
     const screen = this.screen
     if (screen && screen.videoWidth) {
       // Contain-fit so window resizes or surface switches never distort the capture.
-      const s = Math.min(W / screen.videoWidth, H / screen.videoHeight)
-      const w = screen.videoWidth * s
-      const h = screen.videoHeight * s
+      const f = Math.min(W / screen.videoWidth, H / screen.videoHeight)
+      const w = screen.videoWidth * f
+      const h = screen.videoHeight * f
+      ctx.imageSmoothingQuality = 'high'
       ctx.drawImage(screen, (W - w) / 2, (H - h) / 2, w, h)
-      if (this.camera && this.cameraVisible && this.drawBubble) this.drawCameraBubble()
     } else if (!screen && this.camera) {
       if (this.cameraVisible) this.drawCameraFull()
       else this.drawPlaceholder('Camera off')
     }
+    ctx.restore()
+
+    this.drawSpotlight()
+    this.drawRipples(now)
+    if (screen?.videoWidth && this.camera && this.cameraVisible && this.drawBubble) this.drawCameraBubble()
     this.drawStrokes()
+  }
+
+  private drawSpotlight() {
+    if (this.spot.alpha < 0.01) return
+    const { ctx } = this
+    const c = this.toView(this.spot)
+    const r = this.height * 0.15 * this.zoom.s
+    ctx.save()
+    ctx.globalAlpha = this.spot.alpha
+    ctx.fillStyle = 'rgba(2, 8, 23, 0.6)'
+    ctx.beginPath()
+    ctx.rect(0, 0, this.width, this.height)
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
+    ctx.fill('evenodd')
+    ctx.lineWidth = Math.max(2, this.height / 300)
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)'
+    ctx.beginPath()
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  private drawRipples(now: number) {
+    const { ctx } = this
+    for (const r of this.ripples) {
+      const t = (now - r.t) / RIPPLE_MS
+      const c = this.toView(r)
+      const base = this.height * 0.025
+      ctx.save()
+      ctx.globalAlpha = 1 - t
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.35)'
+      ctx.beginPath()
+      ctx.arc(c.x, c.y, base * (1 + t), 0, Math.PI * 2)
+      ctx.fill()
+      ctx.lineWidth = Math.max(2, this.height / 250)
+      ctx.strokeStyle = '#38bdf8'
+      ctx.beginPath()
+      ctx.arc(c.x, c.y, base * (1 + t * 2.5), 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
   }
 
   private drawCameraFull() {

@@ -1,13 +1,30 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { useToast } from '../hooks/useToast'
 import { AudioMixer } from '../lib/audio'
 import { BUBBLE_SIZES, clampLayout, Compositor, outputSize, waitForVideoSize, type BubbleLayout, type Stroke } from '../lib/compositor'
 import { createFileInFolder, ensureWriteAccess, getSaveFolder } from '../lib/files'
 import { defaultRecordingName, formatBytes, formatDuration, safeFileName } from '../lib/format'
 import { extensionFor, pickMimeType, Recorder, videoBitrate, type RecordingResult } from '../lib/recorder'
-import { usesCamera, type BubbleShape, type Mode, type Settings } from '../lib/settings'
+import { clickEffectLabels, usesCamera, usesScreen, type BubbleShape, type ClickEffect, type Mode, type Settings } from '../lib/settings'
 import { BubbleOverlay } from './BubbleOverlay'
-import { IconCamera, IconCameraOff, IconMic, IconMicOff, IconPause, IconPen, IconPlay, IconPopout, IconRestart, IconShape, IconStop, IconTrash } from './Icons'
+import {
+  IconCamera,
+  IconCameraOff,
+  IconClick,
+  IconMic,
+  IconMicOff,
+  IconPause,
+  IconPen,
+  IconPlay,
+  IconPopout,
+  IconResize,
+  IconRestart,
+  IconShape,
+  IconSpotlight,
+  IconStop,
+  IconTrash,
+  IconZoom,
+} from './Icons'
 import { LevelBar, VoiceOrb } from './LevelBar'
 import { openPipWindow, PipPortal, pipSupported } from './Pip'
 
@@ -29,8 +46,21 @@ interface Props {
   onCancel: () => void
 }
 
-const PEN_COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff']
+const PEN_COLORS = ['#0ea5e9', '#ef4444', '#facc15', '#22c55e', '#ffffff']
 const SHAPES: BubbleShape[] = ['circle', 'rounded', 'square']
+const CLICK_TOOLS: { effect: ClickEffect; icon: typeof IconZoom }[] = [
+  { effect: 'zoom', icon: IconZoom },
+  { effect: 'spotlight', icon: IconSpotlight },
+  { effect: 'highlight', icon: IconClick },
+]
+
+/** Size of the always-on-top window for each layout. */
+export const pipSize = (floatingCamera: boolean) => (floatingCamera ? { width: 300, height: 340 } : { width: 480, height: 340 })
+
+function relativePoint(e: PointerEvent<HTMLElement>) {
+  const r = e.currentTarget.getBoundingClientRect()
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
+}
 
 export function Studio({ settings: s, update, screenStream, camStream, micStream, initialPip, onFinished, onCancel }: Props) {
   const toast = useToast()
@@ -44,9 +74,10 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   const [camOn, setCamOn] = useState(true)
   const [pen, setPen] = useState(false)
   const [penColor, setPenColor] = useState(PEN_COLORS[0])
-  const [layout, setLayout] = useState<BubbleLayout>({ x: 0.86, y: 0.78, size: BUBBLE_SIZES[0] })
+  const [layout, setLayout] = useState<BubbleLayout>({ x: 0.86, y: 0.76, size: BUBBLE_SIZES[1] })
   const [aspect, setAspect] = useState(16 / 9)
   const [pip, setPip] = useState<Window | null>(initialPip)
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null)
 
   const compRef = useRef<Compositor | null>(null)
   const mixerRef = useRef<AudioMixer | null>(null)
@@ -84,6 +115,7 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
         videoTracks = comp.captureStream(s.fps).getVideoTracks()
         canvasHost.current?.appendChild(comp.canvas)
         setAspect(comp.aspect)
+        setPreviewStream(new MediaStream(videoTracks))
       }
       streamRef.current = new MediaStream([...videoTracks, ...mixer.stream.getAudioTracks()])
       setReady(true)
@@ -96,6 +128,7 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
       mixer.close()
       mixerRef.current = null
       setReady(false)
+      setPreviewStream(null)
     }
     // The pipeline is fixed for the session; live settings are synced by the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,7 +141,8 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   useEffect(() => mixerRef.current?.setSystemVolume(s.systemGain), [s.systemGain, ready])
   useEffect(() => mixerRef.current?.setMicMuted(micMuted), [micMuted, ready])
 
-  const floatingCam = s.mode === 'screen-camera' && s.bubbleMode === 'floating' && !!pip
+  const floatingCamMode = s.mode === 'screen-camera' && s.bubbleMode === 'floating'
+  const floatingCam = floatingCamMode && !!pip
   useEffect(() => {
     compRef.current?.setCamera(usesCamera(s.mode) ? camStream : null)
   }, [camStream, s.mode, ready])
@@ -120,7 +154,9 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
     c.cameraVisible = camOn
     c.drawBubble = !floatingCam
     c.layout = layout
-  }, [s.bubbleShape, s.mirrorCamera, camOn, floatingCam, layout, ready])
+    c.clickEffect = pen ? 'off' : s.clickEffect
+    c.zoomLevel = s.zoomLevel
+  }, [s.bubbleShape, s.mirrorCamera, camOn, floatingCam, layout, pen, s.clickEffect, s.zoomLevel, ready])
 
   const begin = useCallback(async () => {
     const stream = streamRef.current
@@ -241,10 +277,15 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
 
   const cycleShape = () => update({ bubbleShape: SHAPES[(SHAPES.indexOf(s.bubbleShape) + 1) % SHAPES.length] })
 
+  const chooseEffect = (effect: ClickEffect) => {
+    setPen(false)
+    update({ clickEffect: !pen && s.clickEffect === effect ? 'off' : effect })
+  }
+
   const popOut = async () => {
     try {
-      const floating = s.mode === 'screen-camera' && s.bubbleMode === 'floating'
-      setPip(await openPipWindow(floating ? 300 : 420, floating ? 340 : 110))
+      const { width, height } = pipSize(floatingCamMode)
+      setPip(await openPipWindow(width, height))
     } catch (e) {
       toast(`Could not open floating window: ${(e as Error).message}`, 'error')
     }
@@ -266,6 +307,7 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return compRef.current?.resetEffects()
       if (!e.altKey || !e.shiftKey) return
       const map: Record<string, () => void> = {
         KeyP: () => actions.current.togglePause(),
@@ -296,18 +338,17 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
     return () => window.removeEventListener('beforeunload', warn)
   }, [])
 
-  // Freehand annotations drawn into the video; they fade out after a moment.
-  const point = (e: PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
-  }
+  // Clicking the preview zooms / spotlights / highlights there; with the pen it draws (strokes fade out).
   const onStageDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (!pen || !compRef.current) return
+    const comp = compRef.current
+    if (!comp || e.button !== 0) return
+    const p = relativePoint(e)
+    if (!pen) return comp.click(p.x, p.y)
     e.currentTarget.setPointerCapture(e.pointerId)
-    stroke.current = { color: penColor, points: [point(e)], endedAt: null }
-    compRef.current.strokes.push(stroke.current)
+    stroke.current = { color: penColor, points: [p], endedAt: null }
+    comp.strokes.push(stroke.current)
   }
-  const onStageMove = (e: PointerEvent<HTMLDivElement>) => stroke.current?.points.push(point(e))
+  const onStageMove = (e: PointerEvent<HTMLDivElement>) => stroke.current?.points.push(relativePoint(e))
   const onStageUp = () => {
     if (stroke.current) stroke.current.endedAt = performance.now()
     stroke.current = null
@@ -317,20 +358,9 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   const showBubble = s.mode === 'screen-camera' && camOn && !!camStream && !floatingCam
   const live = phase === 'recording' || phase === 'paused'
   const statusText = phase === 'countdown' ? `Starting in ${count}` : phase === 'starting' ? 'Starting…' : phase === 'paused' ? 'Paused' : phase === 'finishing' ? 'Saving…' : 'Recording'
+  const stageCursor = pen ? 'stage-pen' : s.clickEffect === 'zoom' ? 'stage-zoom' : s.clickEffect === 'off' ? '' : 'stage-click'
 
-  const controls = {
-    phase,
-    live,
-    statusText,
-    elapsed,
-    micMuted,
-    camOn,
-    hasCamera: usesCamera(s.mode),
-    onPause: togglePause,
-    onFinish: () => void finish(),
-    onMute: () => setMicMuted((m) => !m),
-    onCam: () => setCamOn((c) => !c),
-  }
+  const bubbleProps = { layout, shape: s.bubbleShape, aspect, onChange: setLayout, onCycleSize: cycleSize }
 
   return (
     <div className="studio">
@@ -344,8 +374,8 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
           </div>
         ) : (
           <div
-            className={`stage ${pen ? 'stage-pen' : ''}`}
-            style={{ aspectRatio: String(aspect), width: `min(100%, calc((100vh - 200px) * ${aspect}))` }}
+            className={`stage ${stageCursor}`}
+            style={{ aspectRatio: String(aspect), width: `min(100%, calc((100vh - 230px) * ${aspect}))` }}
             onPointerDown={onStageDown}
             onPointerMove={onStageMove}
             onPointerUp={onStageUp}
@@ -353,21 +383,29 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
           >
             <div ref={canvasHost} className="canvas-host" />
             {!ready && <div className="stage-loading">Preparing preview…</div>}
-            {showBubble && <BubbleOverlay layout={layout} shape={s.bubbleShape} aspect={aspect} onChange={setLayout} onCycleSize={cycleSize} />}
+            {showBubble && <BubbleOverlay {...bubbleProps} />}
           </div>
         )}
       </div>
 
+      {usesScreen(s.mode) && !pip && pipSupported && (
+        <p className="stage-hint">
+          Recording another tab or app? <button type="button" className="link-btn" onClick={() => void popOut()}>Open the floating mini-window</button> to see yourself, move your bubble and zoom while you work.
+        </p>
+      )}
+
       {phase === 'countdown' && ready && (
         <div className="countdown" role="dialog" aria-label="Recording countdown">
-          <div className="countdown-num" aria-live="assertive">
-            {count}
+          <div className="countdown-ring">
+            <div className="countdown-num" aria-live="assertive">
+              {count}
+            </div>
           </div>
           <div className="row gap-s">
-            <button type="button" className="btn" onClick={startNow}>
+            <button type="button" className="btn btn-primary" onClick={startNow}>
               Start now
             </button>
-            <button type="button" className="btn btn-ghost" onClick={() => void cancel(false)}>
+            <button type="button" className="btn btn-light" onClick={() => void cancel(false)}>
               Cancel
             </button>
           </div>
@@ -410,15 +448,37 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
             </button>
           )}
           {s.mode === 'screen-camera' && (
-            <button type="button" className="icon-btn" onClick={cycleShape} aria-label={`Bubble shape: ${s.bubbleShape}`} title="Change bubble shape">
-              <IconShape />
-            </button>
+            <>
+              <button type="button" className="icon-btn" onClick={cycleSize} aria-label="Change bubble size" title="Bubble size">
+                <IconResize />
+              </button>
+              <button type="button" className="icon-btn" onClick={cycleShape} aria-label={`Bubble shape: ${s.bubbleShape}`} title="Change bubble shape">
+                <IconShape />
+              </button>
+            </>
           )}
+
           {!isAudio && (
             <>
-              <button type="button" className={`icon-btn ${pen ? 'icon-active' : ''}`} onClick={() => setPen((p) => !p)} aria-pressed={pen} aria-label="Draw on the video" title="Draw (Alt+Shift+D)">
-                <IconPen />
-              </button>
+              <span className="divider" aria-hidden />
+              <div className="tool-group" role="group" aria-label="Click effects">
+                {CLICK_TOOLS.map(({ effect, icon: Icon }) => (
+                  <button
+                    key={effect}
+                    type="button"
+                    className={`icon-btn ${!pen && s.clickEffect === effect ? 'icon-active' : ''}`}
+                    aria-pressed={!pen && s.clickEffect === effect}
+                    aria-label={`Click to ${clickEffectLabels[effect].toLowerCase()}`}
+                    title={`Click on the preview: ${clickEffectLabels[effect]}`}
+                    onClick={() => chooseEffect(effect)}
+                  >
+                    <Icon />
+                  </button>
+                ))}
+                <button type="button" className={`icon-btn ${pen ? 'icon-active' : ''}`} onClick={() => setPen((p) => !p)} aria-pressed={pen} aria-label="Draw on the video" title="Draw (Alt+Shift+D)">
+                  <IconPen />
+                </button>
+              </div>
               {pen && (
                 <div className="swatches" role="radiogroup" aria-label="Pen color">
                   {PEN_COLORS.map((c) => (
@@ -428,8 +488,8 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
               )}
             </>
           )}
-          {pipSupported && (
-            <button type="button" className={`icon-btn ${pip ? 'icon-active' : ''}`} onClick={() => (pip ? pip.close() : void popOut())} aria-pressed={!!pip} aria-label="Floating controls window" title="Floating window (always on top)">
+          {pipSupported && !isAudio && (
+            <button type="button" className={`icon-btn ${pip ? 'icon-active' : ''}`} onClick={() => (pip ? pip.close() : void popOut())} aria-pressed={!!pip} aria-label="Floating mini-window" title="Floating mini-window (always on top)">
               <IconPopout />
             </button>
           )}
@@ -438,63 +498,75 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
 
       {pip && (
         <PipPortal win={pip} onClose={closePip}>
-          <PipControls {...controls} count={count} floating={s.mode === 'screen-camera' && s.bubbleMode === 'floating'} camStream={camStream} mirror={s.mirrorCamera} shape={s.bubbleShape} />
+          <div className={`pip ${floatingCamMode ? 'pip-floating' : ''}`}>
+            {floatingCamMode ? (
+              <PipCamera stream={camOn ? camStream : null} mirror={s.mirrorCamera} shape={s.bubbleShape} />
+            ) : (
+              <PipPreview stream={previewStream} aspect={aspect} onClick={(x, y) => compRef.current?.click(x, y)}>
+                {showBubble && <BubbleOverlay {...bubbleProps} />}
+              </PipPreview>
+            )}
+            <div className="pip-bar">
+              <span className={`rec-dot ${phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
+              <span className="timer">{phase === 'countdown' ? count : formatDuration(elapsed)}</span>
+              <button type="button" className="icon-btn" onClick={togglePause} disabled={!live} aria-label={phase === 'paused' ? 'Resume' : 'Pause'}>
+                {phase === 'paused' ? <IconPlay /> : <IconPause />}
+              </button>
+              <button type="button" className={`icon-btn ${micMuted ? 'icon-off' : ''}`} onClick={() => setMicMuted((m) => !m)} aria-label={micMuted ? 'Unmute' : 'Mute'}>
+                {micMuted ? <IconMicOff /> : <IconMic />}
+              </button>
+              {usesCamera(s.mode) && (
+                <button type="button" className={`icon-btn ${!camOn ? 'icon-off' : ''}`} onClick={() => setCamOn((c) => !c)} aria-label={camOn ? 'Camera off' : 'Camera on'}>
+                  {camOn ? <IconCamera /> : <IconCameraOff />}
+                </button>
+              )}
+              {showBubble && (
+                <button type="button" className="icon-btn" onClick={cycleSize} aria-label="Change bubble size" title="Bubble size">
+                  <IconResize />
+                </button>
+              )}
+              <button type="button" className="btn btn-finish btn-small" onClick={() => void finish()} disabled={!live}>
+                <IconStop width={14} height={14} /> Finish
+              </button>
+            </div>
+          </div>
         </PipPortal>
       )}
     </div>
   )
 }
 
-interface PipProps {
-  phase: Phase
-  live: boolean
-  statusText: string
-  elapsed: number
-  count: number
-  micMuted: boolean
-  camOn: boolean
-  hasCamera: boolean
-  floating: boolean
-  camStream: MediaStream | null
-  mirror: boolean
-  shape: BubbleShape
-  onPause: () => void
-  onFinish: () => void
-  onMute: () => void
-  onCam: () => void
-}
-
-/** Always-on-top window: compact controls, or the Loom-style resizable camera bubble with controls. */
-function PipControls(p: PipProps) {
+/** Live recording preview inside the always-on-top window: drag the bubble, click to zoom. */
+function PipPreview({ stream, aspect, onClick, children }: { stream: MediaStream | null; aspect: number; onClick: (x: number, y: number) => void; children: ReactNode }) {
   const video = useRef<HTMLVideoElement>(null)
   useEffect(() => {
-    if (video.current) video.current.srcObject = p.camStream
-  }, [p.camStream, p.floating, p.camOn])
+    if (video.current) video.current.srcObject = stream
+  }, [stream])
   return (
-    <div className={`pip ${p.floating ? 'pip-floating' : ''}`}>
-      {p.floating && (
-        <div className={`pip-cam pip-cam-${p.shape}`}>
-          {p.camOn && p.camStream ? <video ref={video} autoPlay muted playsInline style={{ transform: p.mirror ? 'scaleX(-1)' : undefined }} /> : <IconCameraOff width={32} height={32} />}
-        </div>
-      )}
-      <div className="pip-bar">
-        <span className={`rec-dot ${p.phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
-        <span className="timer">{p.phase === 'countdown' ? p.count : formatDuration(p.elapsed)}</span>
-        <button type="button" className="icon-btn" onClick={p.onPause} disabled={!p.live} aria-label={p.phase === 'paused' ? 'Resume' : 'Pause'}>
-          {p.phase === 'paused' ? <IconPlay /> : <IconPause />}
-        </button>
-        <button type="button" className={`icon-btn ${p.micMuted ? 'icon-off' : ''}`} onClick={p.onMute} aria-label={p.micMuted ? 'Unmute' : 'Mute'}>
-          {p.micMuted ? <IconMicOff /> : <IconMic />}
-        </button>
-        {p.hasCamera && (
-          <button type="button" className={`icon-btn ${!p.camOn ? 'icon-off' : ''}`} onClick={p.onCam} aria-label={p.camOn ? 'Camera off' : 'Camera on'}>
-            {p.camOn ? <IconCamera /> : <IconCameraOff />}
-          </button>
-        )}
-        <button type="button" className="btn btn-finish btn-small" onClick={p.onFinish} disabled={!p.live}>
-          <IconStop width={14} height={14} /> Finish
-        </button>
-      </div>
+    <div
+      className="pip-stage"
+      style={{ aspectRatio: String(aspect), width: `min(100%, calc((100vh - 64px) * ${aspect}))` }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        const p = relativePoint(e)
+        onClick(p.x, p.y)
+      }}
+    >
+      <video ref={video} autoPlay muted playsInline aria-label="Live recording preview" />
+      {children}
+    </div>
+  )
+}
+
+/** Loom-style camera bubble that fills the floating window. */
+function PipCamera({ stream, mirror, shape }: { stream: MediaStream | null; mirror: boolean; shape: BubbleShape }) {
+  const video = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    if (video.current) video.current.srcObject = stream
+  }, [stream])
+  return (
+    <div className={`pip-cam pip-cam-${shape}`}>
+      {stream ? <video ref={video} autoPlay muted playsInline style={{ transform: mirror ? 'scaleX(-1)' : undefined }} /> : <IconCameraOff width={32} height={32} />}
     </div>
   )
 }

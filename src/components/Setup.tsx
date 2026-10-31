@@ -3,8 +3,8 @@ import type { MediaSources } from '../hooks/useMediaSources'
 import { LevelMeter } from '../lib/audio'
 import { canPickFolders } from '../lib/files'
 import { supportedFormats } from '../lib/recorder'
-import { modeLabels, usesCamera, usesScreen, type Mode, type Settings } from '../lib/settings'
-import { IconCamera, IconFolder, IconMic, IconMicOff, IconScreen, IconScreenCam, IconWave } from './Icons'
+import { clickEffectLabels, modeLabels, usesCamera, usesScreen, type ClickEffect, type Mode, type Settings } from '../lib/settings'
+import { IconCamera, IconFolder, IconMic, IconMicOff, IconScreen, IconScreenCam, IconWave, IconZoom } from './Icons'
 import { LevelBar } from './LevelBar'
 
 interface Props {
@@ -40,7 +40,10 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
   return (
     <div className="setup">
       <section className="panel setup-main" aria-labelledby="setup-title">
-        <h1 id="setup-title" className="setup-title">New recording</h1>
+        <div className="hero">
+          <h1 id="setup-title" className="setup-title">Record your screen, camera &amp; voice</h1>
+          <p className="muted">No sign-up, no uploads. Recordings stay on this computer.</p>
+        </div>
 
         <fieldset className="modes">
           <legend className="label">What do you want to record?</legend>
@@ -176,6 +179,47 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
                 </p>
               </>
             )}
+          </section>
+        )}
+
+        {usesScreen(s.mode) && (
+          <section className="panel" aria-labelledby="effects-title">
+            <h2 id="effects-title" className="panel-title">
+              <IconZoom /> Click effects
+            </h2>
+            <Segmented
+              label="When you click the preview"
+              value={s.clickEffect}
+              options={(Object.keys(clickEffectLabels) as ClickEffect[]).map((k) => [k, clickEffectLabels[k]])}
+              onChange={(v) => update({ clickEffect: v })}
+            />
+            {s.clickEffect === 'zoom' && (
+              <Segmented
+                label="Zoom level"
+                value={String(s.zoomLevel)}
+                options={[
+                  ['1.5', '1.5×'],
+                  ['2', '2×'],
+                  ['2.5', '2.5×'],
+                  ['3', '3×'],
+                ]}
+                onChange={(v) => update({ zoomLevel: Number(v) })}
+              />
+            )}
+            <Toggle
+              label="Floating mini-window while recording"
+              hint={
+                hasDocPip
+                  ? 'An always-on-top window with the live recording: see yourself, drag your camera bubble and click to zoom while you work in other tabs or apps.'
+                  : 'Needs Chrome or Edge.'
+              }
+              checked={s.miniWindow && hasDocPip}
+              onChange={(v) => update({ miniWindow: v })}
+              disabled={!hasDocPip}
+            />
+            <p className="muted small note">
+              Browsers can’t see clicks inside other apps, so effects trigger when you click the preview here or in the mini-window. Effects ease out after a few seconds or on <kbd>Esc</kbd>.
+            </p>
           </section>
         )}
 

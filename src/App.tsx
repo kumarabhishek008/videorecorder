@@ -3,7 +3,8 @@ import { Library } from './components/Library'
 import { openPipWindow } from './components/Pip'
 import { Review } from './components/Review'
 import { Setup } from './components/Setup'
-import { Studio, type FinishedRecording } from './components/Studio'
+import { pipSize, Studio, type FinishedRecording } from './components/Studio'
+import { IconMoon, IconSun } from './components/Icons'
 import { useMediaSources } from './hooks/useMediaSources'
 import { useSettings } from './hooks/useSettings'
 import { useToast } from './hooks/useToast'
@@ -43,6 +44,10 @@ export function App() {
     void requestPersistentStorage()
   }, [])
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme
+  }, [settings.theme])
+
   // Must run straight from the click: screen pickers and floating windows need a user gesture.
   const start = async () => {
     setStartError(null)
@@ -53,8 +58,12 @@ export function App() {
     setStarting(true)
     let pip: Window | null = null
     try {
-      if (settings.mode === 'screen-camera' && settings.bubbleMode === 'floating') {
-        pip = await openPipWindow(300, 340).catch(() => null)
+      // Open the always-on-top window first (Chrome/Edge): it lets you see yourself, move the bubble
+      // and zoom while you work in the tab or app being recorded.
+      const floatingCam = settings.mode === 'screen-camera' && settings.bubbleMode === 'floating'
+      if (usesScreen(settings.mode) && (floatingCam || settings.miniWindow)) {
+        const { width, height } = pipSize(floatingCam)
+        pip = await openPipWindow(width, height).catch(() => null)
       }
       const screen = usesScreen(settings.mode) ? await getScreen(settings) : null
       setSession({ screen, pip })
@@ -137,9 +146,21 @@ export function App() {
     <div className={`app ${recording ? 'app-recording' : ''}`}>
       <header className="topbar">
         <div className="brand">
-          <span className="brand-dot" aria-hidden /> Reel
+          <span className="brand-mark" aria-hidden>
+            <span className="brand-dot" />
+          </span>
+          Reel
         </div>
         <nav aria-label="Main">
+          <button
+            type="button"
+            className="icon-btn theme-btn"
+            onClick={() => update({ theme: settings.theme === 'light' ? 'dark' : 'light' })}
+            aria-label={settings.theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            title="Toggle theme"
+          >
+            {settings.theme === 'light' ? <IconMoon /> : <IconSun />}
+          </button>
           <button type="button" className={`nav-btn ${view === 'setup' ? 'nav-on' : ''}`} onClick={() => setView('setup')} disabled={recording} aria-current={view === 'setup' ? 'page' : undefined}>
             Record
           </button>

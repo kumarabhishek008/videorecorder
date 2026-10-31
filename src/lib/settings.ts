@@ -5,6 +5,8 @@ export type Resolution = 'source' | '720' | '1080' | '1440' | '2160'
 export type Quality = 'low' | 'standard' | 'high' | 'max'
 export type Format = 'webm' | 'mp4'
 export type CursorMode = 'always' | 'motion' | 'never'
+export type ClickEffect = 'zoom' | 'spotlight' | 'highlight' | 'off'
+export type Theme = 'light' | 'dark'
 
 export interface Settings {
   mode: Mode
@@ -32,6 +34,10 @@ export interface Settings {
   keepInLibrary: boolean
   autoSaveToFolder: boolean
   recordToDisk: boolean
+  clickEffect: ClickEffect
+  zoomLevel: number
+  miniWindow: boolean
+  theme: Theme
 }
 
 export const defaultSettings: Settings = {
@@ -60,6 +66,10 @@ export const defaultSettings: Settings = {
   keepInLibrary: true,
   autoSaveToFolder: false,
   recordToDisk: false,
+  clickEffect: 'zoom',
+  zoomLevel: 2,
+  miniWindow: true,
+  theme: 'light',
 }
 
 export const usesScreen = (mode: Mode) => mode === 'screen' || mode === 'screen-camera'
@@ -71,4 +81,11 @@ export const modeLabels: Record<Mode, string> = {
   screen: 'Screen only',
   camera: 'Camera only',
   audio: 'Audio only',
+}
+
+export const clickEffectLabels: Record<ClickEffect, string> = {
+  zoom: 'Zoom in',
+  spotlight: 'Spotlight',
+  highlight: 'Highlight',
+  off: 'Off',
 }

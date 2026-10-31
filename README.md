@@ -29,6 +29,14 @@ Screen capture needs a secure context: `localhost` works for development; deploy
   and a compressor with make-up gain.
 - Echo cancellation and automatic gain toggles; mute/unmute while recording.
 
+**Floating mini-window** (Chrome/Edge, on by default) — opens when you start recording a screen and stays on top
+of every app: it shows the live recording with your face, lets you drag the camera bubble left/right/anywhere,
+change its size, zoom with a click, and pause, mute or finish without coming back to the Reel tab.
+
+**Click effects** — click the preview (or the mini-window) and the recording smoothly **zooms in** there, shows a
+**spotlight**, or just a **highlight** ripple; it eases back out after a few seconds or on `Esc`. Zoom level 1.5×–3×.
+Browsers don’t expose clicks made inside other apps, so effects follow clicks on the preview, not on the captured app.
+
 **While recording**
 - Unlimited length — record until you click **Finish** (or stop sharing from the browser bar).
 - Countdown (0/3/5/10 s) with *Start now*, pause/resume, restart, discard.
@@ -48,6 +56,8 @@ native; 24/30/60 fps; four quality presets; cursor always/when moving/hidden.
 
 **Saving to disk** (Chrome/Edge) — pick a folder once, then optionally auto-save every recording there, or
 *write to disk while recording*, which streams data straight into the file so multi-hour recordings don't sit in memory.
+
+**Look** — light theme with a light-blue accent by default; dark theme toggle in the header.
 
 ## Browser support
 
