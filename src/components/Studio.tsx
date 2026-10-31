@@ -1,0 +1,500 @@
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useToast } from '../hooks/useToast'
+import { AudioMixer } from '../lib/audio'
+import { BUBBLE_SIZES, clampLayout, Compositor, outputSize, waitForVideoSize, type BubbleLayout, type Stroke } from '../lib/compositor'
+import { createFileInFolder, ensureWriteAccess, getSaveFolder } from '../lib/files'
+import { defaultRecordingName, formatBytes, formatDuration, safeFileName } from '../lib/format'
+import { extensionFor, pickMimeType, Recorder, videoBitrate, type RecordingResult } from '../lib/recorder'
+import { usesCamera, type BubbleShape, type Mode, type Settings } from '../lib/settings'
+import { BubbleOverlay } from './BubbleOverlay'
+import { IconCamera, IconCameraOff, IconMic, IconMicOff, IconPause, IconPen, IconPlay, IconPopout, IconRestart, IconShape, IconStop, IconTrash } from './Icons'
+import { LevelBar, VoiceOrb } from './LevelBar'
+import { openPipWindow, PipPortal, pipSupported } from './Pip'
+
+export interface FinishedRecording extends RecordingResult {
+  name: string
+  mode: Mode
+}
+
+type Phase = 'countdown' | 'starting' | 'recording' | 'paused' | 'finishing'
+
+interface Props {
+  settings: Settings
+  update: (p: Partial<Settings>) => void
+  screenStream: MediaStream | null
+  camStream: MediaStream | null
+  micStream: MediaStream | null
+  initialPip: Window | null
+  onFinished: (r: FinishedRecording) => void
+  onCancel: () => void
+}
+
+const PEN_COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff']
+const SHAPES: BubbleShape[] = ['circle', 'rounded', 'square']
+
+export function Studio({ settings: s, update, screenStream, camStream, micStream, initialPip, onFinished, onCancel }: Props) {
+  const toast = useToast()
+  const isAudio = s.mode === 'audio'
+  const [ready, setReady] = useState(false)
+  const [phase, setPhase] = useState<Phase>('countdown')
+  const [count, setCount] = useState(s.countdown)
+  const [elapsed, setElapsed] = useState(0)
+  const [bytes, setBytes] = useState(0)
+  const [micMuted, setMicMuted] = useState(false)
+  const [camOn, setCamOn] = useState(true)
+  const [pen, setPen] = useState(false)
+  const [penColor, setPenColor] = useState(PEN_COLORS[0])
+  const [layout, setLayout] = useState<BubbleLayout>({ x: 0.86, y: 0.78, size: BUBBLE_SIZES[0] })
+  const [aspect, setAspect] = useState(16 / 9)
+  const [pip, setPip] = useState<Window | null>(initialPip)
+
+  const compRef = useRef<Compositor | null>(null)
+  const mixerRef = useRef<AudioMixer | null>(null)
+  const recRef = useRef<Recorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const diskFile = useRef<{ dir: FileSystemDirectoryHandle; name: string } | null>(null)
+  const nameRef = useRef(defaultRecordingName())
+  const canvasHost = useRef<HTMLDivElement>(null)
+  const stroke = useRef<Stroke | null>(null)
+
+  // Build the pipeline once: compositor canvas (video) + audio mixer → one MediaStream.
+  useEffect(() => {
+    let cancelled = false
+    const mixer = new AudioMixer()
+    mixerRef.current = mixer
+    void mixer.resume()
+    mixer.setSystem(screenStream)
+    let comp: Compositor | null = null
+    void (async () => {
+      let videoTracks: MediaStreamTrack[] = []
+      if (!isAudio) {
+        let size
+        if (screenStream) {
+          const src = await waitForVideoSize(screenStream)
+          size = outputSize(src.width, src.height, s.resolution)
+        } else {
+          const hd = s.cameraResolution === '1080'
+          size = outputSize(hd ? 1920 : 1280, hd ? 1080 : 720, s.resolution)
+        }
+        if (cancelled) return
+        comp = new Compositor(size.width, size.height)
+        compRef.current = comp
+        comp.setScreen(screenStream)
+        comp.start(s.fps)
+        videoTracks = comp.captureStream(s.fps).getVideoTracks()
+        canvasHost.current?.appendChild(comp.canvas)
+        setAspect(comp.aspect)
+      }
+      streamRef.current = new MediaStream([...videoTracks, ...mixer.stream.getAudioTracks()])
+      setReady(true)
+    })()
+    return () => {
+      cancelled = true
+      comp?.destroy()
+      comp?.canvas.remove()
+      compRef.current = null
+      mixer.close()
+      mixerRef.current = null
+      setReady(false)
+    }
+    // The pipeline is fixed for the session; live settings are synced by the effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    void mixerRef.current?.setMic(micStream, { voiceIsolation: s.voiceIsolation, noiseGate: s.noiseGate })
+  }, [micStream, s.voiceIsolation, s.noiseGate, ready])
+  useEffect(() => mixerRef.current?.setMicVolume(s.micGain), [s.micGain, ready])
+  useEffect(() => mixerRef.current?.setSystemVolume(s.systemGain), [s.systemGain, ready])
+  useEffect(() => mixerRef.current?.setMicMuted(micMuted), [micMuted, ready])
+
+  const floatingCam = s.mode === 'screen-camera' && s.bubbleMode === 'floating' && !!pip
+  useEffect(() => {
+    compRef.current?.setCamera(usesCamera(s.mode) ? camStream : null)
+  }, [camStream, s.mode, ready])
+  useEffect(() => {
+    const c = compRef.current
+    if (!c) return
+    c.shape = s.bubbleShape
+    c.mirror = s.mirrorCamera
+    c.cameraVisible = camOn
+    c.drawBubble = !floatingCam
+    c.layout = layout
+  }, [s.bubbleShape, s.mirrorCamera, camOn, floatingCam, layout, ready])
+
+  const begin = useCallback(async () => {
+    const stream = streamRef.current
+    if (!stream || recRef.current) return
+    setPhase('starting')
+    const mimeType = pickMimeType(s.format, isAudio ? 'audio' : 'video')
+    if (!mimeType) toast('This browser has no preferred recording format; using its default.', 'info')
+    let file: FileSystemFileHandle | undefined
+    if (s.recordToDisk) {
+      const dir = await getSaveFolder()
+      if (dir && (await ensureWriteAccess(dir, false))) {
+        file = await createFileInFolder(dir, safeFileName(nameRef.current), extensionFor(mimeType))
+        diskFile.current = { dir, name: file.name }
+      } else {
+        toast('No folder access, so this recording is kept in memory. Choose the folder again in settings.', 'error')
+      }
+    }
+    const comp = compRef.current
+    const rec = new Recorder(stream, {
+      mimeType,
+      videoBitsPerSecond: comp ? videoBitrate(comp.width, comp.height, s.fps, s.quality) : undefined,
+      audioBitsPerSecond: s.quality === 'low' ? 96_000 : 160_000,
+      file,
+    })
+    rec.onError = (e) => toast(`Recording error: ${(e as Error)?.message ?? e}`, 'error')
+    recRef.current = rec
+    try {
+      await rec.start()
+      setPhase('recording')
+    } catch (e) {
+      recRef.current = null
+      toast(`Could not start recording: ${(e as Error).message}`, 'error')
+      onCancel()
+    }
+  }, [s.format, s.recordToDisk, s.fps, s.quality, isAudio, toast, onCancel])
+
+  // Countdown, then start.
+  useEffect(() => {
+    if (!ready || phase !== 'countdown') return
+    if (count <= 0) {
+      void begin()
+      return
+    }
+    const t = setTimeout(() => setCount((c) => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [ready, phase, count, begin])
+
+  useEffect(() => {
+    if (phase !== 'recording' && phase !== 'paused') return
+    const t = setInterval(() => {
+      const r = recRef.current
+      if (!r) return
+      setElapsed(r.elapsed())
+      setBytes(r.bytes)
+    }, 250)
+    return () => clearInterval(t)
+  }, [phase])
+
+  const throwAway = async () => {
+    const rec = recRef.current
+    recRef.current = null
+    await rec?.discard()
+    const f = diskFile.current
+    diskFile.current = null
+    if (f) await f.dir.removeEntry(f.name).catch(() => {})
+  }
+
+  const togglePause = () => {
+    const rec = recRef.current
+    if (!rec) return
+    if (phase === 'recording') {
+      rec.pause()
+      setPhase('paused')
+    } else if (phase === 'paused') {
+      rec.resume()
+      setPhase('recording')
+    }
+  }
+
+  const finish = async () => {
+    const rec = recRef.current
+    if (!rec || phase === 'finishing') return
+    setPhase('finishing')
+    recRef.current = null
+    try {
+      const result = await rec.stop()
+      pip?.close()
+      onFinished({ ...result, name: nameRef.current, mode: s.mode })
+    } catch (e) {
+      toast(`Could not finish the recording: ${(e as Error).message}`, 'error')
+      onCancel()
+    }
+  }
+
+  const restart = async () => {
+    await throwAway()
+    nameRef.current = defaultRecordingName()
+    setElapsed(0)
+    setBytes(0)
+    setCount(s.countdown)
+    setPhase('countdown')
+  }
+
+  const cancel = async (ask = true) => {
+    if (ask && recRef.current && recRef.current.elapsed() > 3000 && !window.confirm('Discard this recording? This cannot be undone.')) return
+    await throwAway()
+    pip?.close()
+    onCancel()
+  }
+
+  const startNow = () => setCount(0)
+
+  const cycleSize = () =>
+    setLayout((l) => {
+      const i = BUBBLE_SIZES.findIndex((v) => v > l.size + 0.01)
+      return clampLayout({ ...l, size: i === -1 ? BUBBLE_SIZES[0] : BUBBLE_SIZES[i] }, aspect)
+    })
+
+  const cycleShape = () => update({ bubbleShape: SHAPES[(SHAPES.indexOf(s.bubbleShape) + 1) % SHAPES.length] })
+
+  const popOut = async () => {
+    try {
+      const floating = s.mode === 'screen-camera' && s.bubbleMode === 'floating'
+      setPip(await openPipWindow(floating ? 300 : 420, floating ? 340 : 110))
+    } catch (e) {
+      toast(`Could not open floating window: ${(e as Error).message}`, 'error')
+    }
+  }
+  const closePip = useCallback(() => setPip(null), [])
+
+  // Latest handlers for listeners registered once.
+  const actions = useRef({ finish, cancel, togglePause })
+  actions.current = { finish, cancel, togglePause }
+
+  // "Stop sharing" in the browser bar finishes the recording.
+  useEffect(() => {
+    const track = screenStream?.getVideoTracks()[0]
+    if (!track) return
+    const onEnded = () => (recRef.current ? void actions.current.finish() : void actions.current.cancel(false))
+    track.addEventListener('ended', onEnded)
+    return () => track.removeEventListener('ended', onEnded)
+  }, [screenStream])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || !e.shiftKey) return
+      const map: Record<string, () => void> = {
+        KeyP: () => actions.current.togglePause(),
+        KeyS: () => void actions.current.finish(),
+        KeyM: () => setMicMuted((m) => !m),
+        KeyC: () => setCamOn((c) => !c),
+        KeyD: () => setPen((p) => !p),
+      }
+      const fn = map[e.code]
+      if (fn) {
+        e.preventDefault()
+        fn()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    pip?.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      pip?.removeEventListener('keydown', onKey)
+    }
+  }, [pip])
+
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (recRef.current) e.preventDefault()
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
+
+  // Freehand annotations drawn into the video; they fade out after a moment.
+  const point = (e: PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
+  }
+  const onStageDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (!pen || !compRef.current) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    stroke.current = { color: penColor, points: [point(e)], endedAt: null }
+    compRef.current.strokes.push(stroke.current)
+  }
+  const onStageMove = (e: PointerEvent<HTMLDivElement>) => stroke.current?.points.push(point(e))
+  const onStageUp = () => {
+    if (stroke.current) stroke.current.endedAt = performance.now()
+    stroke.current = null
+  }
+
+  const micLevel = useCallback(() => mixerRef.current?.level('mic') ?? 0, [])
+  const showBubble = s.mode === 'screen-camera' && camOn && !!camStream && !floatingCam
+  const live = phase === 'recording' || phase === 'paused'
+  const statusText = phase === 'countdown' ? `Starting in ${count}` : phase === 'starting' ? 'Starting…' : phase === 'paused' ? 'Paused' : phase === 'finishing' ? 'Saving…' : 'Recording'
+
+  const controls = {
+    phase,
+    live,
+    statusText,
+    elapsed,
+    micMuted,
+    camOn,
+    hasCamera: usesCamera(s.mode),
+    onPause: togglePause,
+    onFinish: () => void finish(),
+    onMute: () => setMicMuted((m) => !m),
+    onCam: () => setCamOn((c) => !c),
+  }
+
+  return (
+    <div className="studio">
+      <div className="stage-wrap">
+        {isAudio ? (
+          <div className="audio-stage">
+            <VoiceOrb getLevel={micLevel} />
+            <div className="timer timer-big" aria-hidden>
+              {formatDuration(elapsed)}
+            </div>
+          </div>
+        ) : (
+          <div
+            className={`stage ${pen ? 'stage-pen' : ''}`}
+            style={{ aspectRatio: String(aspect), width: `min(100%, calc((100vh - 200px) * ${aspect}))` }}
+            onPointerDown={onStageDown}
+            onPointerMove={onStageMove}
+            onPointerUp={onStageUp}
+            onPointerCancel={onStageUp}
+          >
+            <div ref={canvasHost} className="canvas-host" />
+            {!ready && <div className="stage-loading">Preparing preview…</div>}
+            {showBubble && <BubbleOverlay layout={layout} shape={s.bubbleShape} aspect={aspect} onChange={setLayout} onCycleSize={cycleSize} />}
+          </div>
+        )}
+      </div>
+
+      {phase === 'countdown' && ready && (
+        <div className="countdown" role="dialog" aria-label="Recording countdown">
+          <div className="countdown-num" aria-live="assertive">
+            {count}
+          </div>
+          <div className="row gap-s">
+            <button type="button" className="btn" onClick={startNow}>
+              Start now
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => void cancel(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="controlbar" role="toolbar" aria-label="Recording controls">
+        <div className="status">
+          <span className={`rec-dot ${phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
+          <span className="status-text">{statusText}</span>
+          <span className="timer" aria-label={`Elapsed ${formatDuration(elapsed)}`}>
+            {formatDuration(elapsed)}
+          </span>
+          {bytes > 0 && <span className="muted small">{formatBytes(bytes)}</span>}
+        </div>
+
+        <div className="controls">
+          <button type="button" className="icon-btn" onClick={togglePause} disabled={!live} aria-label={phase === 'paused' ? 'Resume' : 'Pause'} title="Pause / resume (Alt+Shift+P)">
+            {phase === 'paused' ? <IconPlay /> : <IconPause />}
+          </button>
+          <button type="button" className="btn btn-finish" onClick={() => void finish()} disabled={!live} title="Finish (Alt+Shift+S)">
+            <IconStop /> Finish
+          </button>
+          <button type="button" className="icon-btn" onClick={() => void restart()} disabled={!live} aria-label="Restart recording" title="Restart">
+            <IconRestart />
+          </button>
+          <button type="button" className="icon-btn icon-danger" onClick={() => void cancel()} aria-label="Discard recording" title="Discard">
+            <IconTrash />
+          </button>
+
+          <span className="divider" aria-hidden />
+
+          <button type="button" className={`icon-btn ${micMuted ? 'icon-off' : ''}`} onClick={() => setMicMuted((m) => !m)} aria-pressed={micMuted} aria-label={micMuted ? 'Unmute microphone' : 'Mute microphone'} title="Mute (Alt+Shift+M)" disabled={!micStream}>
+            {micMuted || !micStream ? <IconMicOff /> : <IconMic />}
+          </button>
+          {micStream && <LevelBar getLevel={micLevel} label="Recording level" vertical />}
+          {usesCamera(s.mode) && (
+            <button type="button" className={`icon-btn ${!camOn ? 'icon-off' : ''}`} onClick={() => setCamOn((c) => !c)} aria-pressed={!camOn} aria-label={camOn ? 'Turn camera off' : 'Turn camera on'} title="Camera (Alt+Shift+C)">
+              {camOn ? <IconCamera /> : <IconCameraOff />}
+            </button>
+          )}
+          {s.mode === 'screen-camera' && (
+            <button type="button" className="icon-btn" onClick={cycleShape} aria-label={`Bubble shape: ${s.bubbleShape}`} title="Change bubble shape">
+              <IconShape />
+            </button>
+          )}
+          {!isAudio && (
+            <>
+              <button type="button" className={`icon-btn ${pen ? 'icon-active' : ''}`} onClick={() => setPen((p) => !p)} aria-pressed={pen} aria-label="Draw on the video" title="Draw (Alt+Shift+D)">
+                <IconPen />
+              </button>
+              {pen && (
+                <div className="swatches" role="radiogroup" aria-label="Pen color">
+                  {PEN_COLORS.map((c) => (
+                    <button key={c} type="button" role="radio" aria-checked={penColor === c} aria-label={c} className={`swatch ${penColor === c ? 'swatch-on' : ''}`} style={{ background: c }} onClick={() => setPenColor(c)} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {pipSupported && (
+            <button type="button" className={`icon-btn ${pip ? 'icon-active' : ''}`} onClick={() => (pip ? pip.close() : void popOut())} aria-pressed={!!pip} aria-label="Floating controls window" title="Floating window (always on top)">
+              <IconPopout />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {pip && (
+        <PipPortal win={pip} onClose={closePip}>
+          <PipControls {...controls} count={count} floating={s.mode === 'screen-camera' && s.bubbleMode === 'floating'} camStream={camStream} mirror={s.mirrorCamera} shape={s.bubbleShape} />
+        </PipPortal>
+      )}
+    </div>
+  )
+}
+
+interface PipProps {
+  phase: Phase
+  live: boolean
+  statusText: string
+  elapsed: number
+  count: number
+  micMuted: boolean
+  camOn: boolean
+  hasCamera: boolean
+  floating: boolean
+  camStream: MediaStream | null
+  mirror: boolean
+  shape: BubbleShape
+  onPause: () => void
+  onFinish: () => void
+  onMute: () => void
+  onCam: () => void
+}
+
+/** Always-on-top window: compact controls, or the Loom-style resizable camera bubble with controls. */
+function PipControls(p: PipProps) {
+  const video = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    if (video.current) video.current.srcObject = p.camStream
+  }, [p.camStream, p.floating, p.camOn])
+  return (
+    <div className={`pip ${p.floating ? 'pip-floating' : ''}`}>
+      {p.floating && (
+        <div className={`pip-cam pip-cam-${p.shape}`}>
+          {p.camOn && p.camStream ? <video ref={video} autoPlay muted playsInline style={{ transform: p.mirror ? 'scaleX(-1)' : undefined }} /> : <IconCameraOff width={32} height={32} />}
+        </div>
+      )}
+      <div className="pip-bar">
+        <span className={`rec-dot ${p.phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
+        <span className="timer">{p.phase === 'countdown' ? p.count : formatDuration(p.elapsed)}</span>
+        <button type="button" className="icon-btn" onClick={p.onPause} disabled={!p.live} aria-label={p.phase === 'paused' ? 'Resume' : 'Pause'}>
+          {p.phase === 'paused' ? <IconPlay /> : <IconPause />}
+        </button>
+        <button type="button" className={`icon-btn ${p.micMuted ? 'icon-off' : ''}`} onClick={p.onMute} aria-label={p.micMuted ? 'Unmute' : 'Mute'}>
+          {p.micMuted ? <IconMicOff /> : <IconMic />}
+        </button>
+        {p.hasCamera && (
+          <button type="button" className={`icon-btn ${!p.camOn ? 'icon-off' : ''}`} onClick={p.onCam} aria-label={p.camOn ? 'Camera off' : 'Camera on'}>
+            {p.camOn ? <IconCamera /> : <IconCameraOff />}
+          </button>
+        )}
+        <button type="button" className="btn btn-finish btn-small" onClick={p.onFinish} disabled={!p.live}>
+          <IconStop width={14} height={14} /> Finish
+        </button>
+      </div>
+    </div>
+  )
+}
