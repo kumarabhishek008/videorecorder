@@ -162,21 +162,17 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
                   ]}
                   onChange={(v) => update({ bubbleShape: v })}
                 />
-                <Segmented
-                  label="Camera bubble"
-                  value={s.bubbleMode}
-                  options={[
-                    ['composite', 'In the video'],
-                    ['floating', 'Floating window'],
-                  ]}
-                  onChange={(v) => update({ bubbleMode: v })}
+                <Toggle
+                  label="Floating camera window"
+                  hint={
+                    hasDocPip
+                      ? 'While recording, only a small resizable camera box floats on top of your apps. Move it anywhere and drag its edges to resize.'
+                      : 'Needs Chrome or Edge. Otherwise move the bubble on the preview in this tab.'
+                  }
+                  checked={s.miniWindow && hasDocPip}
+                  onChange={(v) => update({ miniWindow: v })}
                   disabled={!hasDocPip}
                 />
-                <p className="muted small">
-                  {s.bubbleMode === 'floating' && hasDocPip
-                    ? 'A resizable camera window floats above all your apps. It shows up in the video when you share your entire screen.'
-                    : 'Drag the bubble on the live preview to move it, click it to change size, or drag its corner to resize.'}
-                </p>
               </>
             )}
           </section>
@@ -206,19 +202,17 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
                 onChange={(v) => update({ zoomLevel: Number(v) })}
               />
             )}
-            <Toggle
-              label="Floating mini-window while recording"
-              hint={
-                hasDocPip
-                  ? 'An always-on-top window with the live recording: see yourself, drag your camera bubble and click to zoom while you work in other tabs or apps.'
-                  : 'Needs Chrome or Edge.'
-              }
-              checked={s.miniWindow && hasDocPip}
-              onChange={(v) => update({ miniWindow: v })}
-              disabled={!hasDocPip}
-            />
+            {s.mode === 'screen' && (
+              <Toggle
+                label="Floating controls while recording"
+                hint={hasDocPip ? 'A small always-on-top bar with the timer, pause, mute and finish.' : 'Needs Chrome or Edge.'}
+                checked={s.miniWindow && hasDocPip}
+                onChange={(v) => update({ miniWindow: v })}
+                disabled={!hasDocPip}
+              />
+            )}
             <p className="muted small note">
-              Browsers can’t see clicks inside other apps, so effects trigger when you click the preview here or in the mini-window. Effects ease out after a few seconds or on <kbd>Esc</kbd>.
+              Browsers can’t see clicks inside other apps, so effects trigger when you click the preview in the Reel tab. They ease out after a few seconds or on <kbd>Esc</kbd>.
             </p>
           </section>
         )}

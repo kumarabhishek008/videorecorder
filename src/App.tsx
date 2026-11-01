@@ -55,11 +55,10 @@ export function App() {
     setStarting(true)
     let pip: Window | null = null
     try {
-      // Open the always-on-top window first (Chrome/Edge): it lets you see yourself, move the bubble
-      // and zoom while you work in the tab or app being recorded.
-      const floatingCam = settings.mode === 'screen-camera' && settings.bubbleMode === 'floating'
-      if (usesScreen(settings.mode) && (floatingCam || settings.miniWindow)) {
-        const { width, height } = pipSize(floatingCam)
+      // Open the always-on-top window first (Chrome/Edge): just your camera box (or a small control
+      // bar for screen-only), floating over the tab or app being recorded.
+      if (usesScreen(settings.mode) && settings.miniWindow) {
+        const { width, height } = pipSize(settings.mode === 'screen-camera')
         pip = await openPipWindow(width, height).catch(() => null)
       }
       const screen = usesScreen(settings.mode) ? await getScreen(settings) : null

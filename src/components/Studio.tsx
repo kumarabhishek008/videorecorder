@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
 import { useToast } from '../hooks/useToast'
 import { AudioMixer } from '../lib/audio'
 import { BUBBLE_SIZES, clampLayout, Compositor, outputSize, waitForVideoSize, type BubbleLayout, type Stroke } from '../lib/compositor'
@@ -55,7 +55,7 @@ const CLICK_TOOLS: { effect: ClickEffect; icon: typeof IconZoom }[] = [
 ]
 
 /** Size of the always-on-top window for each layout. */
-export const pipSize = (floatingCamera: boolean) => (floatingCamera ? { width: 300, height: 340 } : { width: 480, height: 340 })
+export const pipSize = (withCamera: boolean) => (withCamera ? { width: 260, height: 260 } : { width: 360, height: 72 })
 
 function relativePoint(e: PointerEvent<HTMLElement>) {
   const r = e.currentTarget.getBoundingClientRect()
@@ -77,7 +77,6 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   const [layout, setLayout] = useState<BubbleLayout>({ x: 0.86, y: 0.76, size: BUBBLE_SIZES[1] })
   const [aspect, setAspect] = useState(16 / 9)
   const [pip, setPip] = useState<Window | null>(initialPip)
-  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null)
 
   const compRef = useRef<Compositor | null>(null)
   const mixerRef = useRef<AudioMixer | null>(null)
@@ -115,7 +114,6 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
         videoTracks = comp.captureStream(s.fps).getVideoTracks()
         canvasHost.current?.appendChild(comp.canvas)
         setAspect(comp.aspect)
-        setPreviewStream(new MediaStream(videoTracks))
       }
       streamRef.current = new MediaStream([...videoTracks, ...mixer.stream.getAudioTracks()])
       setReady(true)
@@ -128,7 +126,6 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
       mixer.close()
       mixerRef.current = null
       setReady(false)
-      setPreviewStream(null)
     }
     // The pipeline is fixed for the session; live settings are synced by the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,8 +138,11 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   useEffect(() => mixerRef.current?.setSystemVolume(s.systemGain), [s.systemGain, ready])
   useEffect(() => mixerRef.current?.setMicMuted(micMuted), [micMuted, ready])
 
-  const floatingCamMode = s.mode === 'screen-camera' && s.bubbleMode === 'floating'
-  const floatingCam = floatingCamMode && !!pip
+  // The floating window shows only your camera. When the whole screen is shared that real window is
+  // captured, so the bubble isn't drawn again; for a single tab or window it's drawn into the video.
+  const floatingCamMode = s.mode === 'screen-camera'
+  const sharedSurface = screenStream?.getVideoTracks()[0]?.getSettings().displaySurface
+  const floatingCam = floatingCamMode && !!pip && sharedSurface === 'monitor'
   useEffect(() => {
     compRef.current?.setCamera(usesCamera(s.mode) ? camStream : null)
   }, [camStream, s.mode, ready])
@@ -388,9 +388,24 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
         )}
       </div>
 
-      {usesScreen(s.mode) && !pip && pipSupported && (
+      {usesScreen(s.mode) && pipSupported && (
         <p className="stage-hint">
-          Recording another tab or app? <button type="button" className="link-btn" onClick={() => void popOut()}>Open the floating mini-window</button> to see yourself, move your bubble and zoom while you work.
+          {pip ? (
+            floatingCam ? (
+              'Your camera is in its own floating window and is recorded with your screen. Drag its edges to resize it and move it anywhere.'
+            ) : floatingCamMode ? (
+              'Your camera floats over your apps so you can see yourself. In the video it sits where the bubble is here.'
+            ) : (
+              'Recording controls are in the small floating window.'
+            )
+          ) : (
+            <>
+              <button type="button" className="link-btn" onClick={() => void popOut()}>
+                {floatingCamMode ? 'Open the floating camera window' : 'Open floating controls'}
+              </button>{' '}
+              to keep {floatingCamMode ? 'your face' : 'the controls'} on top of other apps while you record.
+            </>
+          )}
         </p>
       )}
 
@@ -498,14 +513,8 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
 
       {pip && (
         <PipPortal win={pip} onClose={closePip}>
-          <div className={`pip ${floatingCamMode ? 'pip-floating' : ''}`}>
-            {floatingCamMode ? (
-              <PipCamera stream={camOn ? camStream : null} mirror={s.mirrorCamera} shape={s.bubbleShape} />
-            ) : (
-              <PipPreview stream={previewStream} aspect={aspect} onClick={(x, y) => compRef.current?.click(x, y)}>
-                {showBubble && <BubbleOverlay {...bubbleProps} />}
-              </PipPreview>
-            )}
+          <div className={`pip ${floatingCamMode ? 'pip-face' : 'pip-compact'}`}>
+            {floatingCamMode && <PipCamera stream={camOn ? camStream : null} mirror={s.mirrorCamera} shape={s.bubbleShape} />}
             <div className="pip-bar">
               <span className={`rec-dot ${phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
               <span className="timer">{phase === 'countdown' ? count : formatDuration(elapsed)}</span>
@@ -515,45 +524,14 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
               <button type="button" className={`icon-btn ${micMuted ? 'icon-off' : ''}`} onClick={() => setMicMuted((m) => !m)} aria-label={micMuted ? 'Unmute' : 'Mute'}>
                 {micMuted ? <IconMicOff /> : <IconMic />}
               </button>
-              {usesCamera(s.mode) && (
-                <button type="button" className={`icon-btn ${!camOn ? 'icon-off' : ''}`} onClick={() => setCamOn((c) => !c)} aria-label={camOn ? 'Camera off' : 'Camera on'}>
-                  {camOn ? <IconCamera /> : <IconCameraOff />}
-                </button>
-              )}
-              {showBubble && (
-                <button type="button" className="icon-btn" onClick={cycleSize} aria-label="Change bubble size" title="Bubble size">
-                  <IconResize />
-                </button>
-              )}
-              <button type="button" className="btn btn-finish btn-small" onClick={() => void finish()} disabled={!live}>
-                <IconStop width={14} height={14} /> Finish
+              <button type="button" className="btn btn-finish btn-small" onClick={() => void finish()} disabled={!live} aria-label="Finish recording">
+                <IconStop width={14} height={14} />
+                {!floatingCamMode && 'Finish'}
               </button>
             </div>
           </div>
         </PipPortal>
       )}
-    </div>
-  )
-}
-
-/** Live recording preview inside the always-on-top window: drag the bubble, click to zoom. */
-function PipPreview({ stream, aspect, onClick, children }: { stream: MediaStream | null; aspect: number; onClick: (x: number, y: number) => void; children: ReactNode }) {
-  const video = useRef<HTMLVideoElement>(null)
-  useEffect(() => {
-    if (video.current) video.current.srcObject = stream
-  }, [stream])
-  return (
-    <div
-      className="pip-stage"
-      style={{ aspectRatio: String(aspect), width: `min(100%, calc((100vh - 64px) * ${aspect}))` }}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        const p = relativePoint(e)
-        onClick(p.x, p.y)
-      }}
-    >
-      <video ref={video} autoPlay muted playsInline aria-label="Live recording preview" />
-      {children}
     </div>
   )
 }

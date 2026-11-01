@@ -1,6 +1,5 @@
 export type Mode = 'screen-camera' | 'screen' | 'camera' | 'audio'
 export type BubbleShape = 'circle' | 'rounded' | 'square'
-export type BubbleMode = 'composite' | 'floating'
 export type Resolution = 'source' | '720' | '1080' | '1440' | '2160'
 export type Quality = 'low' | 'standard' | 'high' | 'max'
 export type Format = 'webm' | 'mp4'
@@ -28,7 +27,6 @@ export interface Settings {
   mirrorCamera: boolean
   backgroundBlur: boolean
   bubbleShape: BubbleShape
-  bubbleMode: BubbleMode
   cursor: CursorMode
   keepInLibrary: boolean
   autoSaveToFolder: boolean
@@ -59,7 +57,6 @@ export const defaultSettings: Settings = {
   mirrorCamera: true,
   backgroundBlur: false,
   bubbleShape: 'circle',
-  bubbleMode: 'composite',
   cursor: 'always',
   keepInLibrary: true,
   autoSaveToFolder: false,
