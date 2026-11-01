@@ -6,7 +6,6 @@ export type Quality = 'low' | 'standard' | 'high' | 'max'
 export type Format = 'webm' | 'mp4'
 export type CursorMode = 'always' | 'motion' | 'never'
 export type ClickEffect = 'zoom' | 'spotlight' | 'highlight' | 'off'
-export type Theme = 'light' | 'dark'
 
 export interface Settings {
   mode: Mode
@@ -37,7 +36,6 @@ export interface Settings {
   clickEffect: ClickEffect
   zoomLevel: number
   miniWindow: boolean
-  theme: Theme
 }
 
 export const defaultSettings: Settings = {
@@ -69,7 +67,6 @@ export const defaultSettings: Settings = {
   clickEffect: 'zoom',
   zoomLevel: 2,
   miniWindow: true,
-  theme: 'light',
 }
 
 export const usesScreen = (mode: Mode) => mode === 'screen' || mode === 'screen-camera'

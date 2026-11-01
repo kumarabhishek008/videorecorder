@@ -3,8 +3,8 @@ import { Library } from './components/Library'
 import { openPipWindow } from './components/Pip'
 import { Review } from './components/Review'
 import { Setup } from './components/Setup'
+import { IconLibrary, IconScreenCam } from './components/Icons'
 import { pipSize, Studio, type FinishedRecording } from './components/Studio'
-import { IconMoon, IconSun } from './components/Icons'
 import { useMediaSources } from './hooks/useMediaSources'
 import { useSettings } from './hooks/useSettings'
 import { useToast } from './hooks/useToast'
@@ -44,9 +44,6 @@ export function App() {
     void requestPersistentStorage()
   }, [])
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme
-  }, [settings.theme])
 
   // Must run straight from the click: screen pickers and floating windows need a user gesture.
   const start = async () => {
@@ -152,20 +149,11 @@ export function App() {
           Reel
         </div>
         <nav aria-label="Main">
-          <button
-            type="button"
-            className="icon-btn theme-btn"
-            onClick={() => update({ theme: settings.theme === 'light' ? 'dark' : 'light' })}
-            aria-label={settings.theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-            title="Toggle theme"
-          >
-            {settings.theme === 'light' ? <IconMoon /> : <IconSun />}
-          </button>
           <button type="button" className={`nav-btn ${view === 'setup' ? 'nav-on' : ''}`} onClick={() => setView('setup')} disabled={recording} aria-current={view === 'setup' ? 'page' : undefined}>
-            Record
+            <IconScreenCam /> Record
           </button>
           <button type="button" className={`nav-btn ${view === 'library' ? 'nav-on' : ''}`} onClick={() => setView('library')} disabled={recording} aria-current={view === 'library' ? 'page' : undefined}>
-            Library
+            <IconLibrary /> Library
           </button>
         </nav>
       </header>

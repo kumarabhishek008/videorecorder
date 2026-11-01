@@ -21,8 +21,6 @@ function copyStyles(target: Window) {
     }
   }
   target.document.documentElement.className = document.documentElement.className
-  const theme = document.documentElement.dataset.theme
-  if (theme) target.document.documentElement.dataset.theme = theme
   target.document.body.classList.add('pip-body')
 }
 

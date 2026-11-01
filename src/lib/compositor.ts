@@ -189,7 +189,7 @@ export class Compositor {
     const H = canvas.height
     const now = performance.now()
     this.updateEffects(now)
-    ctx.fillStyle = '#0b0b0d'
+    ctx.fillStyle = '#eef4f9'
     ctx.fillRect(0, 0, W, H)
 
     const { s, x0, y0 } = this.view()
@@ -223,7 +223,7 @@ export class Compositor {
     const r = this.height * 0.15 * this.zoom.s
     ctx.save()
     ctx.globalAlpha = this.spot.alpha
-    ctx.fillStyle = 'rgba(2, 8, 23, 0.6)'
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.72)'
     ctx.beginPath()
     ctx.rect(0, 0, this.width, this.height)
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
@@ -318,7 +318,7 @@ export class Compositor {
 
   private drawPlaceholder(text: string) {
     const { ctx } = this
-    ctx.fillStyle = '#a1a1aa'
+    ctx.fillStyle = '#64748b'
     ctx.font = `${Math.round(this.height / 20)}px system-ui, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
