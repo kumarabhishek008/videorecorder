@@ -29,7 +29,7 @@ export async function openPipWindow(width: number, height: number): Promise<Wind
   if (!window.documentPictureInPicture) return null
   window.documentPictureInPicture.window?.close()
   const win = await window.documentPictureInPicture.requestWindow({ width, height })
-  win.document.title = 'Reel'
+  win.document.title = 'Studio Recorder'
   copyStyles(win)
   return win
 }

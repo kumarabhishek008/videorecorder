@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
 import { useToast } from '../hooks/useToast'
+import { GlassCamera } from './GlassCamera'
 import { AudioMixer } from '../lib/audio'
 import { BUBBLE_SIZES, clampLayout, Compositor, outputSize, waitForVideoSize, type BubbleLayout, type Stroke } from '../lib/compositor'
 import { createFileInFolder, ensureWriteAccess, getSaveFolder } from '../lib/files'
 import { defaultRecordingName, formatBytes, formatDuration, safeFileName } from '../lib/format'
+import { isMirrored } from '../lib/media'
 import { extensionFor, pickMimeType, Recorder, videoBitrate, type RecordingResult } from '../lib/recorder'
 import { clickEffectLabels, usesCamera, usesScreen, type BubbleShape, type ClickEffect, type Mode, type Settings } from '../lib/settings'
 import { BubbleOverlay } from './BubbleOverlay'
@@ -11,6 +13,7 @@ import {
   IconCamera,
   IconCameraOff,
   IconClick,
+  IconFlip,
   IconMic,
   IconMicOff,
   IconPause,
@@ -41,12 +44,13 @@ interface Props {
   screenStream: MediaStream | null
   camStream: MediaStream | null
   micStream: MediaStream | null
+  canFlip: boolean
   initialPip: Window | null
   onFinished: (r: FinishedRecording) => void
   onCancel: () => void
 }
 
-const PEN_COLORS = ['#0ea5e9', '#ef4444', '#facc15', '#22c55e', '#ffffff']
+const PEN_COLORS = ['#ff8080', '#ffffff', '#facc15', '#22c55e', '#0ea5e9']
 const SHAPES: BubbleShape[] = ['circle', 'rounded', 'square']
 const CLICK_TOOLS: { effect: ClickEffect; icon: typeof IconZoom }[] = [
   { effect: 'zoom', icon: IconZoom },
@@ -62,7 +66,7 @@ function relativePoint(e: PointerEvent<HTMLElement>) {
   return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
 }
 
-export function Studio({ settings: s, update, screenStream, camStream, micStream, initialPip, onFinished, onCancel }: Props) {
+export function Studio({ settings: s, update, screenStream, camStream, micStream, canFlip, initialPip, onFinished, onCancel }: Props) {
   const toast = useToast()
   const isAudio = s.mode === 'audio'
   const [ready, setReady] = useState(false)
@@ -99,8 +103,10 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
       let videoTracks: MediaStreamTrack[] = []
       if (!isAudio) {
         let size
-        if (screenStream) {
-          const src = await waitForVideoSize(screenStream)
+        const source = screenStream ?? camStream
+        if (source) {
+          // Follow the real picture so a phone held upright records a portrait video.
+          const src = await waitForVideoSize(source)
           size = outputSize(src.width, src.height, s.resolution)
         } else {
           const hd = s.cameraResolution === '1080'
@@ -143,20 +149,23 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   const floatingCamMode = s.mode === 'screen-camera'
   const sharedSurface = screenStream?.getVideoTracks()[0]?.getSettings().displaySurface
   const floatingCam = floatingCamMode && !!pip && sharedSurface === 'monitor'
+  const mirror = isMirrored(s)
+  // While a phone flips cameras the stream is briefly null; the last frame holds until the new one arrives.
   useEffect(() => {
-    compRef.current?.setCamera(usesCamera(s.mode) ? camStream : null)
+    if (camStream && usesCamera(s.mode)) compRef.current?.setCamera(camStream)
   }, [camStream, s.mode, ready])
   useEffect(() => {
     const c = compRef.current
     if (!c) return
     c.shape = s.bubbleShape
-    c.mirror = s.mirrorCamera
+    c.mirror = mirror
+    c.cameraZoom = s.cameraZoom
     c.cameraVisible = camOn
     c.drawBubble = !floatingCam
     c.layout = layout
     c.clickEffect = pen ? 'off' : s.clickEffect
     c.zoomLevel = s.zoomLevel
-  }, [s.bubbleShape, s.mirrorCamera, camOn, floatingCam, layout, pen, s.clickEffect, s.zoomLevel, ready])
+  }, [s.bubbleShape, s.cameraZoom, mirror, camOn, floatingCam, layout, pen, s.clickEffect, s.zoomLevel, ready])
 
   const begin = useCallback(async () => {
     const stream = streamRef.current
@@ -358,7 +367,7 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
   const showBubble = s.mode === 'screen-camera' && camOn && !!camStream && !floatingCam
   const live = phase === 'recording' || phase === 'paused'
   const statusText = phase === 'countdown' ? `Starting in ${count}` : phase === 'starting' ? 'Starting…' : phase === 'paused' ? 'Paused' : phase === 'finishing' ? 'Saving…' : 'Recording'
-  const stageCursor = pen ? 'stage-pen' : s.clickEffect === 'zoom' ? 'stage-zoom' : s.clickEffect === 'off' ? '' : 'stage-click'
+  const stageCursor = pen ? 'stage-pen' : s.clickEffect === 'zoom' ? (s.zoomLevel < 1 ? 'stage-zoom-out' : 'stage-zoom') : s.clickEffect === 'off' ? '' : 'stage-click'
 
   const bubbleProps = { layout, shape: s.bubbleShape, aspect, onChange: setLayout, onCycleSize: cycleSize }
 
@@ -375,7 +384,7 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
         ) : (
           <div
             className={`stage ${stageCursor}`}
-            style={{ aspectRatio: String(aspect), width: `min(100%, calc((100vh - 230px) * ${aspect}))` }}
+            style={{ aspectRatio: String(aspect), width: `min(100cqw, calc(100cqh * ${aspect}))` }}
             onPointerDown={onStageDown}
             onPointerMove={onStageMove}
             onPointerUp={onStageUp}
@@ -462,6 +471,11 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
               {camOn ? <IconCamera /> : <IconCameraOff />}
             </button>
           )}
+          {usesCamera(s.mode) && canFlip && (
+            <button type="button" className="icon-btn" onClick={() => update({ cameraFacing: s.cameraFacing === 'user' ? 'environment' : 'user' })} aria-label={s.cameraFacing === 'user' ? 'Switch to back camera' : 'Switch to front camera'} title="Switch camera">
+              <IconFlip />
+            </button>
+          )}
           {s.mode === 'screen-camera' && (
             <>
               <button type="button" className="icon-btn" onClick={cycleSize} aria-label="Change bubble size" title="Bubble size">
@@ -514,7 +528,7 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
       {pip && (
         <PipPortal win={pip} onClose={closePip}>
           <div className={`pip ${floatingCamMode ? 'pip-face' : 'pip-compact'}`}>
-            {floatingCamMode && <PipCamera stream={camOn ? camStream : null} mirror={s.mirrorCamera} shape={s.bubbleShape} />}
+            {floatingCamMode && <PipCamera stream={camOn ? camStream : null} mirror={mirror} shape={s.bubbleShape} zoom={s.cameraZoom} />}
             <div className="pip-bar">
               <span className={`rec-dot ${phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
               <span className="timer">{phase === 'countdown' ? count : formatDuration(elapsed)}</span>
@@ -537,14 +551,10 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
 }
 
 /** Loom-style camera bubble that fills the floating window. */
-function PipCamera({ stream, mirror, shape }: { stream: MediaStream | null; mirror: boolean; shape: BubbleShape }) {
-  const video = useRef<HTMLVideoElement>(null)
-  useEffect(() => {
-    if (video.current) video.current.srcObject = stream
-  }, [stream])
+function PipCamera({ stream, mirror, shape, zoom }: { stream: MediaStream | null; mirror: boolean; shape: BubbleShape; zoom: number }) {
   return (
-    <div className={`pip-cam pip-cam-${shape}`}>
-      {stream ? <video ref={video} autoPlay muted playsInline style={{ transform: mirror ? 'scaleX(-1)' : undefined }} /> : <IconCameraOff width={32} height={32} />}
+    <div className={`pip-cam pip-cam-${shape}`} style={{ '--cam-zoom': zoom } as CSSProperties}>
+      {stream ? <GlassCamera stream={stream} mirror={mirror} /> : <IconCameraOff width={32} height={32} />}
     </div>
   )
 }

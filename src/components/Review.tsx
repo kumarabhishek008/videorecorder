@@ -9,6 +9,7 @@ import { deleteRecording, updateRecording } from '../lib/storage'
 import { captureFrame } from '../lib/thumbnail'
 import { trimRecording, type TrimJob } from '../lib/trim'
 import { IconDownload, IconFolder, IconImage, IconLibrary, IconPlus, IconSave, IconScissors, IconTrash } from './Icons'
+import { Player, type PlayerMedia } from './Player'
 
 interface Props {
   recording: OpenRecording
@@ -19,8 +20,6 @@ interface Props {
   onOpen: (r: OpenRecording) => void
 }
 
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
-
 export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpen }: Props) {
   const toast = useToast()
   const { meta, blob, stored } = recording
@@ -29,9 +28,8 @@ export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpe
   const url = useMemo(() => URL.createObjectURL(blob), [blob])
   useEffect(() => () => URL.revokeObjectURL(url), [url])
 
-  const player = useRef<HTMLVideoElement & HTMLAudioElement>(null)
+  const player = useRef<PlayerMedia>(null)
   const [name, setName] = useState(meta.name)
-  const [speed, setSpeed] = useState(1)
   const [busy, setBusy] = useState<string | null>(null)
   const durationSec = meta.durationMs / 1000
   const [trimOpen, setTrimOpen] = useState(false)
@@ -44,10 +42,6 @@ export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpe
     setRange([0, meta.durationMs / 1000])
     setTrimOpen(false)
   }, [meta.id, meta.name, meta.durationMs])
-
-  useEffect(() => {
-    if (player.current) player.current.playbackRate = speed
-  }, [speed, url])
 
   useEffect(() => () => trimJob.current?.cancel(), [])
 
@@ -129,42 +123,26 @@ export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpe
 
   return (
     <div className="review">
-      <section className="review-player" aria-label="Playback">
-        {isAudio ? (
-          <div className="audio-player">
-            <audio ref={player} src={url} controls autoPlay />
-          </div>
-        ) : (
-          <video ref={player} src={url} controls autoPlay playsInline className="player" />
-        )}
-        <div className="row wrap gap-s player-tools">
-          <label className="row gap-s small">
-            <span className="muted">Speed</span>
-            <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed">
-              {SPEEDS.map((v) => (
-                <option key={v} value={v}>
-                  {v}×
-                </option>
-              ))}
-            </select>
-          </label>
+      <section className="review-main" aria-label="Playback">
+        <Player key={url} url={url} isAudio={isAudio} durationSec={durationSec} mediaRef={player} selection={trimOpen ? range : null} />
+        <div className="player-tools">
           {!isAudio && (
             <button type="button" className="btn btn-small btn-ghost" onClick={screenshot} disabled={!!busy}>
-              <IconImage width={16} height={16} /> Save frame as PNG
+              <IconImage /> Save frame
             </button>
           )}
-          <button type="button" className="btn btn-small btn-ghost" onClick={() => setTrimOpen(!trimOpen)} aria-expanded={trimOpen}>
-            <IconScissors width={16} height={16} /> Trim
+          <button type="button" className={`btn btn-small btn-ghost ${trimOpen ? 'btn-on' : ''}`} onClick={() => setTrimOpen(!trimOpen)} aria-expanded={trimOpen}>
+            <IconScissors /> Trim
           </button>
-          {!isAudio && document.pictureInPictureEnabled && (
-            <button type="button" className="btn btn-small btn-ghost" onClick={() => void player.current?.requestPictureInPicture().catch(() => {})}>
-              Picture-in-picture
-            </button>
-          )}
+          <span className="shortcuts muted small">
+            <kbd>Space</kbd> play <kbd>←</kbd>
+            <kbd>→</kbd> 5s <kbd>,</kbd>
+            <kbd>.</kbd> frame <kbd>M</kbd> mute <kbd>F</kbd> fullscreen
+          </span>
         </div>
 
         {trimOpen && (
-          <div className="trim panel">
+          <div className="trim">
             <div className="trim-track">
               <div className="trim-sel" style={{ left: `${(range[0] / durationSec) * 100}%`, right: `${100 - (range[1] / durationSec) * 100}%` }} />
               <input
@@ -222,7 +200,7 @@ export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpe
         )}
       </section>
 
-      <aside className="review-side panel">
+      <aside className="review-side">
         <label className="field">
           <span className="label">Name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => void rename()} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />

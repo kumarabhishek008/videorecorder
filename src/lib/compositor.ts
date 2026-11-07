@@ -17,6 +17,9 @@ export interface Stroke {
 export const BUBBLE_SIZES = [0.22, 0.34, 0.5]
 const STROKE_HOLD_MS = 2500
 const STROKE_FADE_MS = 800
+/** Size of the tiny copy of the camera that is scaled back up as the bubble's frosted backdrop. */
+const FROST_SIZE = 32
+
 /** How long a click zoom / spotlight stays before easing back out. */
 const EFFECT_HOLD_MS = 3500
 const RIPPLE_MS = 700
@@ -65,6 +68,8 @@ export class Compositor {
   layout: BubbleLayout = { x: 0.88, y: 0.8, size: BUBBLE_SIZES[0] }
   shape: BubbleShape = 'circle'
   mirror = true
+  /** Camera picture size; below 1 more of the picture fits, with a dark backdrop around it. */
+  cameraZoom = 1
   cameraVisible = true
   /** When false the camera is shown in a floating window instead of being drawn into the video. */
   drawBubble = true
@@ -78,6 +83,7 @@ export class Compositor {
   private spot = { x: 0.5, y: 0.5, alpha: 0, until: 0 }
   private ripples: { x: number; y: number; t: number }[] = []
   private lastFrame = 0
+  private frost = document.createElement('canvas')
 
   constructor(width: number, height: number) {
     this.canvas = document.createElement('canvas')
@@ -135,7 +141,9 @@ export class Compositor {
   /** Reacts to a click at a point of the displayed frame (0..1): ripple, plus zoom or spotlight. */
   click(nx: number, ny: number) {
     if (this.clickEffect === 'off') return
-    const p = this.toSource(nx, ny)
+    // While zoomed out the click can land on the backdrop around the picture.
+    const q = this.toSource(nx, ny)
+    const p = { x: clamp(q.x, 0, 1), y: clamp(q.y, 0, 1) }
     const now = performance.now()
     this.ripples.push({ ...p, t: now })
     if (this.clickEffect === 'zoom') {
@@ -157,6 +165,8 @@ export class Compositor {
   private view() {
     const s = this.zoom.s
     const max = 1 - 1 / s
+    // Below 1× the whole frame is shown smaller, shrinking towards the clicked point.
+    if (s < 1) return { s, x0: this.zoom.x * max, y0: this.zoom.y * max }
     return { s, x0: clamp(this.zoom.x - 0.5 / s, 0, max), y0: clamp(this.zoom.y - 0.5 / s, 0, max) }
   }
 
@@ -178,7 +188,7 @@ export class Compositor {
     this.zoom.s += (this.zoomTarget.s - this.zoom.s) * k
     this.zoom.x += (this.zoomTarget.x - this.zoom.x) * k
     this.zoom.y += (this.zoomTarget.y - this.zoom.y) * k
-    if (this.zoomTarget.s === 1 && this.zoom.s < 1.002) this.zoom.s = 1
+    if (this.zoomTarget.s === 1 && Math.abs(this.zoom.s - 1) < 0.002) this.zoom.s = 1
     this.spot.alpha += ((now < this.spot.until ? 1 : 0) - this.spot.alpha) * k
     this.ripples = this.ripples.filter((r) => now - r.t < RIPPLE_MS)
   }
@@ -189,7 +199,7 @@ export class Compositor {
     const H = canvas.height
     const now = performance.now()
     this.updateEffects(now)
-    ctx.fillStyle = '#eef4f9'
+    ctx.fillStyle = '#0a0a0b'
     ctx.fillRect(0, 0, W, H)
 
     const { s, x0, y0 } = this.view()
@@ -223,13 +233,13 @@ export class Compositor {
     const r = this.height * 0.15 * this.zoom.s
     ctx.save()
     ctx.globalAlpha = this.spot.alpha
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.72)'
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)'
     ctx.beginPath()
     ctx.rect(0, 0, this.width, this.height)
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
     ctx.fill('evenodd')
     ctx.lineWidth = Math.max(2, this.height / 300)
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)'
+    ctx.strokeStyle = 'rgba(255, 128, 128, 0.9)'
     ctx.beginPath()
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
     ctx.stroke()
@@ -244,12 +254,12 @@ export class Compositor {
       const base = this.height * 0.025
       ctx.save()
       ctx.globalAlpha = 1 - t
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.35)'
+      ctx.fillStyle = 'rgba(255, 128, 128, 0.35)'
       ctx.beginPath()
       ctx.arc(c.x, c.y, base * (1 + t), 0, Math.PI * 2)
       ctx.fill()
       ctx.lineWidth = Math.max(2, this.height / 250)
-      ctx.strokeStyle = '#38bdf8'
+      ctx.strokeStyle = '#ff8080'
       ctx.beginPath()
       ctx.arc(c.x, c.y, base * (1 + t * 2.5), 0, Math.PI * 2)
       ctx.stroke()
@@ -263,7 +273,7 @@ export class Compositor {
     const { ctx } = this
     const W = this.width
     const H = this.height
-    const s = Math.max(W / cam.videoWidth, H / cam.videoHeight)
+    const s = Math.max(W / cam.videoWidth, H / cam.videoHeight) * this.cameraZoom
     const w = cam.videoWidth * s
     const h = cam.videoHeight * s
     ctx.save()
@@ -297,28 +307,42 @@ export class Compositor {
     bubblePath(ctx, this.shape, x, y, d)
     ctx.clip()
     const side = Math.min(cam.videoWidth, cam.videoHeight)
-    const sx = (cam.videoWidth - side) / 2
-    const sy = (cam.videoHeight - side) / 2
+    const f = (d * this.cameraZoom) / side
+    const w = cam.videoWidth * f
+    const h = cam.videoHeight * f
+    ctx.translate(x, y)
     if (this.mirror) {
-      ctx.translate(x + d, y)
+      ctx.translate(d, 0)
       ctx.scale(-1, 1)
-      ctx.drawImage(cam, sx, sy, side, side, 0, 0, d, d)
-    } else {
-      ctx.drawImage(cam, sx, sy, side, side, x, y, d, d)
     }
+    if (this.cameraZoom < 1) {
+      this.frost.width = this.frost.height = FROST_SIZE
+      this.frost.getContext('2d')!.drawImage(cam, (cam.videoWidth - side) / 2, (cam.videoHeight - side) / 2, side, side, 0, 0, FROST_SIZE, FROST_SIZE)
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(this.frost, 0, 0, d, d)
+    }
+    ctx.drawImage(cam, (d - w) / 2, (d - h) / 2, w, h)
     ctx.restore()
 
+    // Glass: a diagonal sheen and a thin bright rim.
     ctx.save()
     bubblePath(ctx, this.shape, x, y, d)
-    ctx.lineWidth = Math.max(2, d * 0.012)
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+    const sheen = ctx.createLinearGradient(x, y, x + d, y + d)
+    sheen.addColorStop(0, 'rgba(255,255,255,0.3)')
+    sheen.addColorStop(0.45, 'rgba(255,255,255,0)')
+    sheen.addColorStop(0.75, 'rgba(255,255,255,0)')
+    sheen.addColorStop(1, 'rgba(255,255,255,0.12)')
+    ctx.fillStyle = sheen
+    ctx.fill()
+    ctx.lineWidth = Math.max(1.5, d * 0.008)
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'
     ctx.stroke()
     ctx.restore()
   }
 
   private drawPlaceholder(text: string) {
     const { ctx } = this
-    ctx.fillStyle = '#64748b'
+    ctx.fillStyle = '#9a9aa3'
     ctx.font = `${Math.round(this.height / 20)}px system-ui, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -350,15 +374,12 @@ export class Compositor {
 
 const RES_HEIGHT: Record<string, number> = { '720': 720, '1080': 1080, '1440': 1440, '2160': 2160 }
 
-/** Output canvas size: the capture's aspect ratio, capped to the chosen height, with even dimensions. */
+/** Output canvas size: the capture's aspect ratio, capped on its short side, with even dimensions. */
 export function outputSize(srcW: number, srcH: number, resolution: string): { width: number; height: number } {
   const maxH = RES_HEIGHT[resolution]
-  let w = srcW
-  let h = srcH
-  if (maxH && h > maxH) {
-    w = (w * maxH) / h
-    h = maxH
-  }
+  const scale = maxH ? Math.min(1, maxH / Math.min(srcW, srcH)) : 1
+  const w = srcW * scale
+  const h = srcH * scale
   const even = (n: number) => Math.max(2, Math.round(n / 2) * 2)
   return { width: even(w), height: even(h) }
 }

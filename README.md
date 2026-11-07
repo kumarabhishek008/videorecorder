@@ -1,4 +1,4 @@
-# Reel — browser screen recorder
+# Studio Recorder — browser screen recorder
 
 A local-first screen, camera and audio recorder that runs entirely in the browser — no login, no uploads.
 Recordings stay on your computer: in the in-browser library (IndexedDB) and/or saved to any folder on your drives.
@@ -31,10 +31,10 @@ Screen capture needs a secure context: `localhost` works for development; deploy
 
 **Floating mini-window** (Chrome/Edge, on by default) — opens when you start recording a screen and stays on top
 of every app: it shows the live recording with your face, lets you drag the camera bubble left/right/anywhere,
-change its size, zoom with a click, and pause, mute or finish without coming back to the Reel tab.
+change its size, zoom with a click, and pause, mute or finish without coming back to the Studio Recorder tab.
 
-**Click effects** — click the preview (or the mini-window) and the recording smoothly **zooms in** there, shows a
-**spotlight**, or just a **highlight** ripple; it eases back out after a few seconds or on `Esc`. Zoom level 1.5×–3×.
+**Click effects** — click the preview (or the mini-window) and the recording smoothly **zooms** in or out there, shows a
+**spotlight**, or just a **highlight** ripple; it eases back out after a few seconds or on `Esc`. Zoom level 0.5×–3×: below 1× the picture shrinks towards the click, with a dark backdrop around it.
 Browsers don’t expose clicks made inside other apps, so effects follow clicks on the preview, not on the captured app.
 
 **While recording**
@@ -57,7 +57,11 @@ native; 24/30/60 fps; four quality presets; cursor always/when moving/hidden.
 **Saving to disk** (Chrome/Edge) — pick a folder once, then optionally auto-save every recording there, or
 *write to disk while recording*, which streams data straight into the file so multi-hour recordings don't sit in memory.
 
-**Look** — light theme with a light-blue accent by default; dark theme toggle in the header.
+**Look** — full-screen white background with black text and light red accents.
+
+**Cameras** — set Camera zoom (0.5×, 0.75× or 1×, default 0.75×) to fit more of the picture in the frame, with a dark backdrop around it. On a phone or tablet, switch between the front and back camera, even mid-recording (the back camera is never mirrored). On a computer, use the default camera or pick one from the list. Phones can't share their screen from a browser, so they offer Camera and Audio modes.
+
+**Player** — custom controls with click-to-seek timeline, 5-second skip, frame stepping, speed, volume, picture-in-picture and fullscreen. Keys: `Space` play · `←`/`→` 5s · `,`/`.` frame · `↑`/`↓` volume · `M` mute · `F` fullscreen.
 
 ## Browser support
 

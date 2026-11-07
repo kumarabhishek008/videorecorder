@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { MediaSources } from '../hooks/useMediaSources'
 import { LevelMeter } from '../lib/audio'
 import { canPickFolders } from '../lib/files'
+import { canCaptureScreen, isMirrored, isPhone } from '../lib/media'
 import { supportedFormats } from '../lib/recorder'
 import { clickEffectLabels, modeLabels, usesCamera, usesScreen, type ClickEffect, type Mode, type Settings } from '../lib/settings'
-import { IconCamera, IconFolder, IconMic, IconMicOff, IconScreen, IconScreenCam, IconWave, IconZoom } from './Icons'
+import { IconCamera, IconFlip, IconFolder, IconMic, IconMicOff, IconScreen, IconScreenCam, IconWave, IconZoom } from './Icons'
+import { GlassCamera } from './GlassCamera'
 import { LevelBar } from './LevelBar'
+import { Select } from './Select'
 
 interface Props {
   settings: Settings
@@ -36,18 +39,21 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
   const deviceLabel = (d: MediaDeviceInfo, i: number, kind: string) => d.label || `${kind} ${i + 1}`
   const startLabel = s.mode === 'audio' ? 'Start recording audio' : usesScreen(s.mode) ? 'Choose screen & record' : 'Start recording'
   const missingMic = s.mode === 'audio' && !sources.micStream
+  const modes = MODES.filter((m) => canCaptureScreen || !usesScreen(m.mode))
+  const mirror = isMirrored(s)
+  const flip = () => update({ cameraFacing: s.cameraFacing === 'user' ? 'environment' : 'user' })
 
   return (
     <div className="setup">
-      <section className="panel setup-main" aria-labelledby="setup-title">
+      <section className="setup-main" aria-labelledby="setup-title">
         <div className="hero">
-          <h1 id="setup-title" className="setup-title">Record your screen, camera &amp; voice</h1>
-          <p className="muted">No sign-up, no uploads. Recordings stay on this computer.</p>
+          <h1 id="setup-title" className="setup-title">New recording</h1>
+          <p className="muted">No sign-up, no uploads. Recordings stay on this {isPhone ? 'device' : 'computer'}.</p>
         </div>
 
         <fieldset className="modes">
-          <legend className="label">What do you want to record?</legend>
-          {MODES.map((m) => (
+          <legend className="sr-only">What do you want to record?</legend>
+          {modes.map((m) => (
             <label key={m.mode} className={`mode ${s.mode === m.mode ? 'mode-on' : ''}`}>
               <input type="radio" name="mode" value={m.mode} checked={s.mode === m.mode} onChange={() => update({ mode: m.mode })} />
               <span className="mode-icon">{m.icon}</span>
@@ -57,97 +63,155 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
           ))}
         </fieldset>
 
-        <div className="sources">
-          {usesCamera(s.mode) && (
-            <div className="field">
-              <label className="label" htmlFor="cam">
-                Camera
-              </label>
-              <select id="cam" value={s.cameraId} onChange={(e) => update({ cameraId: e.target.value })}>
-                <option value="">Default camera</option>
-                {sources.devices.cameras.map((d, i) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {deviceLabel(d, i, 'Camera')}
-                  </option>
-                ))}
-              </select>
-              {sources.camError && <p className="error-text">{sources.camError}</p>}
-            </div>
-          )}
-
-          <div className="field">
-            <div className="label-row">
-              <label className="label" htmlFor="mic">
-                Microphone
-              </label>
-              <button
-                type="button"
-                className={`chip ${s.micEnabled ? 'chip-on' : ''}`}
-                aria-pressed={s.micEnabled}
-                onClick={() => update({ micEnabled: !s.micEnabled })}
-              >
-                {s.micEnabled ? <IconMic width={14} height={14} /> : <IconMicOff width={14} height={14} />}
-                {s.micEnabled ? 'On' : 'Off'}
-              </button>
-            </div>
-            <select id="mic" value={s.micId} disabled={!s.micEnabled} onChange={(e) => update({ micId: e.target.value })}>
-              <option value="">Default microphone</option>
-              {sources.devices.mics.map((d, i) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {deviceLabel(d, i, 'Microphone')}
-                </option>
-              ))}
-            </select>
-            {sources.micStream && <MicPreview stream={sources.micStream} />}
-            {sources.micError && <p className="error-text">{sources.micError}</p>}
-          </div>
-
+        <div className="setup-stage">
+          {s.mode === 'camera' && <CameraPreview stream={sources.camStream} mirror={mirror} shape="fill" zoom={s.cameraZoom} />}
           {usesScreen(s.mode) && (
-            <Toggle
-              label="Record system / tab audio"
-              hint="Chrome shares tab audio; full system audio depends on your OS."
-              checked={s.systemAudio}
-              onChange={(v) => update({ systemAudio: v })}
-            />
+            <div className="stage-note">
+              <IconScreen width={34} height={34} />
+              <span>You’ll choose a screen, window or tab next</span>
+            </div>
           )}
-
-          <Toggle
-            label="Voice isolation"
-            hint="Browser noise suppression + voice EQ, noise gate and compressor."
-            checked={s.voiceIsolation}
-            onChange={(v) => update({ voiceIsolation: v })}
-            disabled={!s.micEnabled}
-          />
+          {s.mode === 'screen-camera' && <CameraPreview stream={sources.camStream} mirror={mirror} shape={s.bubbleShape} zoom={s.cameraZoom} />}
+          {s.mode === 'audio' && (
+            <div className="stage-note">
+              <IconWave width={34} height={34} />
+              <span>Voice and audio only</span>
+            </div>
+          )}
+          {usesCamera(s.mode) && sources.canFlip && (
+            <button type="button" className="icon-btn stage-flip" onClick={flip} aria-label={s.cameraFacing === 'user' ? 'Switch to back camera' : 'Switch to front camera'} title="Switch camera">
+              <IconFlip />
+            </button>
+          )}
         </div>
 
-        {(sources.camError || sources.micError) && (
-          <button type="button" className="btn btn-ghost" onClick={sources.retry}>
-            Retry camera / microphone access
+        <div className="setup-foot">
+          <button type="button" className="btn btn-record" onClick={onStart} disabled={starting || missingMic}>
+            <span className="rec-dot" aria-hidden />
+            {starting ? 'Starting…' : startLabel}
           </button>
-        )}
-
-        <button type="button" className="btn btn-record" onClick={onStart} disabled={starting || missingMic}>
-          <span className="rec-dot" aria-hidden />
-          {starting ? 'Starting…' : startLabel}
-        </button>
+          {!isPhone && (
+            <p className="muted small shortcuts">
+              <kbd>Alt</kbd>
+              <kbd>Shift</kbd> + <kbd>P</kbd> pause <kbd>S</kbd> finish <kbd>M</kbd> mute <kbd>C</kbd> camera <kbd>D</kbd> draw
+            </p>
+          )}
+        </div>
         {missingMic && <p className="muted small">Turn on a microphone to record audio.</p>}
         {error && (
           <p className="error-text" role="alert">
             {error}
           </p>
         )}
-        <p className="muted small">
-          Everything stays on this computer. Shortcuts while recording: <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> pause,{' '}
-          <kbd>S</kbd> finish, <kbd>M</kbd> mute, <kbd>C</kbd> camera, <kbd>D</kbd> draw.
-        </p>
       </section>
 
       <aside className="setup-side">
+        <section className="panel" aria-label="Sources">
+          <div className="sources">
+            {usesCamera(s.mode) && (
+              <div className="field">
+                {isPhone ? (
+                  sources.canFlip && (
+                    <Segmented
+                      label="Camera"
+                      value={s.cameraFacing}
+                      options={[
+                        ['user', 'Front'],
+                        ['environment', 'Back'],
+                      ]}
+                      onChange={(v) => update({ cameraFacing: v })}
+                    />
+                  )
+                ) : (
+                  <>
+                    <label id="cam-label" className="label" htmlFor="cam">
+                      Camera
+                    </label>
+                    <Select
+                      id="cam"
+                      labelledBy="cam-label"
+                      value={s.cameraId}
+                      options={[['', 'Default camera'], ...sources.devices.cameras.map((d, i): [string, string] => [d.deviceId, deviceLabel(d, i, 'Camera')])]}
+                      onChange={(v) => update({ cameraId: v })}
+                    />
+                  </>
+                )}
+                {sources.camError && <p className="error-text">{sources.camError}</p>}
+              </div>
+            )}
+
+            {usesCamera(s.mode) && (
+              <Segmented
+                label="Camera zoom"
+                value={String(s.cameraZoom)}
+                options={[
+                  ['0.5', '0.5×'],
+                  ['0.75', '0.75×'],
+                  ['1', '1×'],
+                ]}
+                onChange={(v) => update({ cameraZoom: Number(v) })}
+              />
+            )}
+
+            <div className="field">
+              <div className="label-row">
+                <label id="mic-label" className="label" htmlFor="mic">
+                  Microphone
+                </label>
+                <button
+                  type="button"
+                  className={`chip ${s.micEnabled ? 'chip-on' : ''}`}
+                  aria-pressed={s.micEnabled}
+                  onClick={() => update({ micEnabled: !s.micEnabled })}
+                >
+                  {s.micEnabled ? <IconMic width={14} height={14} /> : <IconMicOff width={14} height={14} />}
+                  {s.micEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              <Select
+                id="mic"
+                labelledBy="mic-label"
+                value={s.micId}
+                disabled={!s.micEnabled}
+                options={[['', 'Default microphone'], ...sources.devices.mics.map((d, i): [string, string] => [d.deviceId, deviceLabel(d, i, 'Microphone')])]}
+                onChange={(v) => update({ micId: v })}
+              />
+              {sources.micStream && <MicPreview stream={sources.micStream} />}
+              {sources.micError && <p className="error-text">{sources.micError}</p>}
+            </div>
+
+            {usesScreen(s.mode) && (
+              <Toggle
+                label="Record system / tab audio"
+                hint="Chrome shares tab audio; full system audio depends on your OS."
+                checked={s.systemAudio}
+                onChange={(v) => update({ systemAudio: v })}
+              />
+            )}
+
+            <Toggle
+              label="Voice isolation"
+              hint="Browser noise suppression + voice EQ, noise gate and compressor."
+              checked={s.voiceIsolation}
+              onChange={(v) => update({ voiceIsolation: v })}
+              disabled={!s.micEnabled}
+            />
+
+            {(sources.camError || sources.micError) && (
+              <button type="button" className="btn btn-ghost" onClick={sources.retry}>
+                Retry camera / microphone access
+              </button>
+            )}
+          </div>
+        </section>
+
         {usesCamera(s.mode) && (
-          <section className="panel" aria-label="Camera preview">
-            <CameraPreview stream={sources.camStream} mirror={s.mirrorCamera} shape={s.mode === 'camera' ? 'wide' : s.bubbleShape} />
+          <section className="panel" aria-labelledby="camera-title">
+            <h2 id="camera-title" className="panel-title">
+              <IconCamera /> Camera
+            </h2>
             <div className="row wrap gap-s">
-              <Toggle label="Mirror" checked={s.mirrorCamera} onChange={(v) => update({ mirrorCamera: v })} compact />
+              {(!isPhone || s.cameraFacing === 'user') && <Toggle label="Mirror" checked={s.mirrorCamera} onChange={(v) => update({ mirrorCamera: v })} compact />}
               {sources.blurSupported && <Toggle label="Blur background" checked={s.backgroundBlur} onChange={(v) => update({ backgroundBlur: v })} compact />}
             </div>
             {s.mode === 'screen-camera' && (
@@ -194,6 +258,8 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
                 label="Zoom level"
                 value={String(s.zoomLevel)}
                 options={[
+                  ['0.5', '0.5×'],
+                  ['0.75', '0.75×'],
                   ['1.5', '1.5×'],
                   ['2', '2×'],
                   ['2.5', '2.5×'],
@@ -212,7 +278,7 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
               />
             )}
             <p className="muted small note">
-              Browsers can’t see clicks inside other apps, so effects trigger when you click the preview in the Reel tab. They ease out after a few seconds or on <kbd>Esc</kbd>.
+              Browsers can’t see clicks inside other apps, so effects trigger when you click the preview in the Studio Recorder tab. They ease out after a few seconds or on <kbd>Esc</kbd>.
             </p>
           </section>
         )}
@@ -364,14 +430,15 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
   )
 }
 
-function CameraPreview({ stream, mirror, shape }: { stream: MediaStream | null; mirror: boolean; shape: string }) {
+function CameraPreview({ stream, mirror, shape, zoom }: { stream: MediaStream | null; mirror: boolean; shape: string; zoom: number }) {
   const ref = useRef<HTMLVideoElement>(null)
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream
   }, [stream])
+  const picture = shape === 'fill' ? <video ref={ref} autoPlay muted playsInline style={{ transform: mirror ? 'scaleX(-1)' : undefined }} aria-label="Camera preview" /> : stream && <GlassCamera stream={stream} mirror={mirror} />
   return (
-    <div className={`cam-preview cam-${shape}`}>
-      {stream ? <video ref={ref} autoPlay muted playsInline style={{ transform: mirror ? 'scaleX(-1)' : undefined }} aria-label="Camera preview" /> : <span className="muted small">Waiting for camera…</span>}
+    <div className={`cam-preview cam-${shape}`} style={{ '--cam-zoom': zoom } as CSSProperties}>
+      {stream ? picture : <span className="muted small">Waiting for camera…</span>}
     </div>
   )
 }
@@ -418,17 +485,14 @@ export function Toggle({
 }
 
 function SelectField({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
+  const labelId = useId()
   return (
-    <label className="field">
-      <span className="label">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map(([v, l]) => (
-          <option key={v} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="field">
+      <span id={labelId} className="label">
+        {label}
+      </span>
+      <Select labelledBy={labelId} value={value} options={options} onChange={onChange} />
+    </div>
   )
 }
 

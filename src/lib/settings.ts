@@ -5,10 +5,12 @@ export type Quality = 'low' | 'standard' | 'high' | 'max'
 export type Format = 'webm' | 'mp4'
 export type CursorMode = 'always' | 'motion' | 'never'
 export type ClickEffect = 'zoom' | 'spotlight' | 'highlight' | 'off'
+export type CameraFacing = 'user' | 'environment'
 
 export interface Settings {
   mode: Mode
   cameraId: string
+  cameraFacing: CameraFacing
   micId: string
   micEnabled: boolean
   systemAudio: boolean
@@ -26,6 +28,7 @@ export interface Settings {
   cameraResolution: '720' | '1080'
   mirrorCamera: boolean
   backgroundBlur: boolean
+  cameraZoom: number
   bubbleShape: BubbleShape
   cursor: CursorMode
   keepInLibrary: boolean
@@ -39,6 +42,7 @@ export interface Settings {
 export const defaultSettings: Settings = {
   mode: 'screen-camera',
   cameraId: '',
+  cameraFacing: 'user',
   micId: '',
   micEnabled: true,
   systemAudio: true,
@@ -56,6 +60,7 @@ export const defaultSettings: Settings = {
   cameraResolution: '720',
   mirrorCamera: true,
   backgroundBlur: false,
+  cameraZoom: 0.75,
   bubbleShape: 'circle',
   cursor: 'always',
   keepInLibrary: true,
@@ -78,7 +83,7 @@ export const modeLabels: Record<Mode, string> = {
 }
 
 export const clickEffectLabels: Record<ClickEffect, string> = {
-  zoom: 'Zoom in',
+  zoom: 'Zoom',
   spotlight: 'Spotlight',
   highlight: 'Highlight',
   off: 'Off',

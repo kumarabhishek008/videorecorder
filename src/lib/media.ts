@@ -1,5 +1,18 @@
 import type { Settings } from './settings'
 
+export const canCaptureScreen = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia
+
+/** Phones and tablets switch between front and back cameras; computers pick a device from a list. */
+export const isPhone =
+  typeof navigator !== 'undefined' &&
+  ((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+    // iPadOS reports itself as a Mac.
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
+/** The back camera is never mirrored: it would flip text in the shot. */
+export const isMirrored = (s: Settings) => s.mirrorCamera && (!isPhone || s.cameraFacing === 'user')
+
 export interface DeviceLists {
   cameras: MediaDeviceInfo[]
   mics: MediaDeviceInfo[]
@@ -22,7 +35,7 @@ export async function getCamera(s: Settings): Promise<MediaStream> {
   const hd = s.cameraResolution === '1080'
   return navigator.mediaDevices.getUserMedia({
     video: {
-      deviceId: s.cameraId ? { exact: s.cameraId } : undefined,
+      ...(isPhone ? { facingMode: { ideal: s.cameraFacing } } : { deviceId: s.cameraId ? { exact: s.cameraId } : undefined }),
       width: { ideal: hd ? 1920 : 1280 },
       height: { ideal: hd ? 1080 : 720 },
       frameRate: { ideal: 30 },

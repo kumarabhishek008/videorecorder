@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { applyBackgroundBlur, describeMediaError, getCamera, getMic, listDevices, stopStream, supportsBackgroundBlur, type DeviceLists } from '../lib/media'
+import { applyBackgroundBlur, describeMediaError, getCamera, getMic, isPhone, listDevices, stopStream, supportsBackgroundBlur, type DeviceLists } from '../lib/media'
 import { usesCamera, type Settings } from '../lib/settings'
 
 /** Keeps live camera and mic streams that match the current settings. Shared by setup preview and recording. */
@@ -43,7 +43,7 @@ export function useMediaSources(s: Settings) {
       setCamStream(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantCamera, s.cameraId, s.cameraResolution, retry, refreshDevices])
+  }, [wantCamera, s.cameraId, s.cameraFacing, s.cameraResolution, retry, refreshDevices])
 
   useEffect(() => {
     if (camStream) void applyBackgroundBlur(camStream, s.backgroundBlur)
@@ -77,6 +77,8 @@ export function useMediaSources(s: Settings) {
     camError: wantCamera ? camError : null,
     micError: s.micEnabled ? micError : null,
     blurSupported: supportsBackgroundBlur(camStream),
+    // Camera names are hidden until permission is granted, so only a known single camera rules it out.
+    canFlip: isPhone && devices.cameras.length !== 1,
     retry: () => setRetry((n) => n + 1),
   }
 }

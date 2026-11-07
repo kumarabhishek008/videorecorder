@@ -3,7 +3,7 @@ import { Library } from './components/Library'
 import { openPipWindow } from './components/Pip'
 import { Review } from './components/Review'
 import { Setup } from './components/Setup'
-import { IconLibrary, IconScreenCam } from './components/Icons'
+import { IconFullscreen, IconFullscreenExit, IconLibrary, IconScreenCam } from './components/Icons'
 import { pipSize, Studio, type FinishedRecording } from './components/Studio'
 import { useMediaSources } from './hooks/useMediaSources'
 import { useSettings } from './hooks/useSettings'
@@ -11,7 +11,7 @@ import { useToast } from './hooks/useToast'
 import { clearSaveFolder, ensureWriteAccess, getSaveFolder, pickSaveFolder, saveToFolder } from './lib/files'
 import { safeFileName } from './lib/format'
 import { persistRecording, type OpenRecording } from './lib/library'
-import { describeMediaError, getScreen, stopStream } from './lib/media'
+import { canCaptureScreen, describeMediaError, getScreen, stopStream } from './lib/media'
 import { extensionFor } from './lib/recorder'
 import { usesScreen } from './lib/settings'
 import { requestPersistentStorage } from './lib/storage'
@@ -22,8 +22,6 @@ interface Session {
   screen: MediaStream | null
   pip: Window | null
 }
-
-const canCaptureScreen = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia
 
 export function App() {
   const { settings, update, reset } = useSettings()
@@ -36,6 +34,7 @@ export function App() {
   const [startError, setStartError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [folderName, setFolderName] = useState<string | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
 
   useEffect(() => {
     getSaveFolder()
@@ -44,6 +43,21 @@ export function App() {
     void requestPersistentStorage()
   }, [])
 
+  // Phones can't share their screen from a browser, so start them on the camera.
+  useEffect(() => {
+    if (!canCaptureScreen && usesScreen(settings.mode)) update({ mode: 'camera' })
+  }, [settings.mode, update])
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void document.documentElement.requestFullscreen().catch(() => {})
+  }
 
   // Must run straight from the click: screen pickers and floating windows need a user gesture.
   const start = async () => {
@@ -145,7 +159,7 @@ export function App() {
           <span className="brand-mark" aria-hidden>
             <span className="brand-dot" />
           </span>
-          Reel
+          Studio Recorder
         </div>
         <nav aria-label="Main">
           <button type="button" className={`nav-btn ${view === 'setup' ? 'nav-on' : ''}`} onClick={() => setView('setup')} disabled={recording} aria-current={view === 'setup' ? 'page' : undefined}>
@@ -155,6 +169,13 @@ export function App() {
             <IconLibrary /> Library
           </button>
         </nav>
+        {document.fullscreenEnabled ? (
+          <button type="button" className="icon-btn topbar-end" onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} title={fullscreen ? 'Exit full screen' : 'Full screen'}>
+            {fullscreen ? <IconFullscreenExit /> : <IconFullscreen />}
+          </button>
+        ) : (
+          <span className="topbar-end" />
+        )}
       </header>
 
       <main className="content">
@@ -179,6 +200,7 @@ export function App() {
             screenStream={session.screen}
             camStream={sources.camStream}
             micStream={sources.micStream}
+            canFlip={sources.canFlip}
             initialPip={session.pip}
             onFinished={(r) => void onFinished(r)}
             onCancel={onCancel}
