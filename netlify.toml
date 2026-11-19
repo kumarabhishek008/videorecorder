@@ -1,0 +1,9 @@
+# Netlify settings (these override the ones in the Netlify UI).
+# Netlify detects Next.js and runs its Next.js adapter, which serves the pages and API routes
+# from the .next build output, so the publish folder must be .next, not dist.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
