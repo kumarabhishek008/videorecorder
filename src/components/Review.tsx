@@ -8,7 +8,7 @@ import type { Settings } from '../lib/settings'
 import { deleteRecording, updateRecording } from '../lib/storage'
 import { captureFrame } from '../lib/thumbnail'
 import { trimRecording, type TrimJob } from '../lib/trim'
-import { IconDownload, IconFolder, IconImage, IconLibrary, IconPlus, IconSave, IconScissors, IconTrash } from './Icons'
+import { IconDownload, IconEdit, IconFolder, IconImage, IconLibrary, IconPlus, IconSave, IconScissors, IconTrash } from './Icons'
 import { Player, type PlayerMedia } from './Player'
 
 interface Props {
@@ -18,9 +18,10 @@ interface Props {
   onLibrary: () => void
   onDeleted: () => void
   onOpen: (r: OpenRecording) => void
+  onEdit: (r: OpenRecording) => void
 }
 
-export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpen }: Props) {
+export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpen, onEdit }: Props) {
   const toast = useToast()
   const { meta, blob, stored } = recording
   const isAudio = meta.mimeType.startsWith('audio')
@@ -133,6 +134,9 @@ export function Review({ recording, settings, onNew, onLibrary, onDeleted, onOpe
           )}
           <button type="button" className={`btn btn-small btn-ghost ${trimOpen ? 'btn-on' : ''}`} onClick={() => setTrimOpen(!trimOpen)} aria-expanded={trimOpen}>
             <IconScissors /> Trim
+          </button>
+          <button type="button" className="btn btn-small btn-ghost" onClick={() => onEdit(recording)} title="Open in the editor: timelines, text, colors, transitions and object removal">
+            <IconEdit /> Edit
           </button>
           <span className="shortcuts muted small">
             <kbd>Space</kbd> play <kbd>←</kbd>

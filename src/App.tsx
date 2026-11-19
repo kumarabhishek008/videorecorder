@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Editor } from './components/editor/Editor'
 import { Library } from './components/Library'
 import { openPipWindow } from './components/Pip'
 import { Review } from './components/Review'
 import { Setup } from './components/Setup'
-import { IconFullscreen, IconFullscreenExit, IconLibrary, IconScreenCam } from './components/Icons'
+import { IconEdit, IconFullscreen, IconFullscreenExit, IconLibrary, IconScreenCam } from './components/Icons'
 import { pipSize, Studio, type FinishedRecording } from './components/Studio'
 import { useMediaSources } from './hooks/useMediaSources'
 import { useSettings } from './hooks/useSettings'
@@ -16,7 +17,7 @@ import { extensionFor } from './lib/recorder'
 import { usesScreen } from './lib/settings'
 import { requestPersistentStorage } from './lib/storage'
 
-type View = 'setup' | 'studio' | 'review' | 'library'
+type View = 'setup' | 'studio' | 'review' | 'library' | 'editor'
 
 interface Session {
   screen: MediaStream | null
@@ -35,6 +36,8 @@ export function App() {
   const [saving, setSaving] = useState(false)
   const [folderName, setFolderName] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  const [toEdit, setToEdit] = useState<OpenRecording | null>(null)
+  const consumeEdit = useCallback(() => setToEdit(null), [])
 
   useEffect(() => {
     getSaveFolder()
@@ -168,6 +171,9 @@ export function App() {
           <button type="button" className={`nav-btn ${view === 'library' ? 'nav-on' : ''}`} onClick={() => setView('library')} disabled={recording} aria-current={view === 'library' ? 'page' : undefined}>
             <IconLibrary /> Library
           </button>
+          <button type="button" className={`nav-btn ${view === 'editor' ? 'nav-on' : ''}`} onClick={() => setView('editor')} disabled={recording} aria-current={view === 'editor' ? 'page' : undefined}>
+            <IconEdit /> Edit
+          </button>
         </nav>
         {document.fullscreenEnabled ? (
           <button type="button" className="icon-btn topbar-end" onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} title={fullscreen ? 'Exit full screen' : 'Full screen'}>
@@ -201,6 +207,8 @@ export function App() {
             camStream={sources.camStream}
             micStream={sources.micStream}
             canFlip={sources.canFlip}
+            objectList={sources.objectList}
+            objectStatus={sources.objectStatus}
             initialPip={session.pip}
             onFinished={(r) => void onFinished(r)}
             onCancel={onCancel}
@@ -222,9 +230,14 @@ export function App() {
                 setView('library')
               }}
               onOpen={openRecording}
+              onEdit={(r) => {
+                setToEdit(r)
+                setView('editor')
+              }}
             />
           ))}
         {view === 'library' && <Library onOpen={openRecording} onNew={() => setView('setup')} />}
+        {view === 'editor' && <Editor settings={settings} incoming={toEdit} onConsumed={consumeEdit} onOpen={openRecording} />}
       </main>
     </div>
   )

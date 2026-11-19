@@ -1,55 +1,114 @@
-import type { SVGProps } from 'react'
+// App icons, from the Lucide icon library (lucide.dev). Names are kept so screens don't change.
+import {
+  AudioLines,
+  Blend,
+  Check,
+  ChevronDown,
+  Clapperboard,
+  FastForward,
+  Focus,
+  Folder,
+  Image,
+  Layers,
+  LayoutGrid,
+  Maximize,
+  Mic,
+  MicOff,
+  Minimize,
+  Monitor,
+  MonitorPlay,
+  Moon,
+  MousePointerClick,
+  Palette,
+  Pause,
+  PenLine,
+  PictureInPicture2,
+  Play,
+  Plus,
+  Redo2,
+  Rewind,
+  RotateCcw,
+  Save,
+  Scaling,
+  ScanSearch,
+  Scissors,
+  Shapes,
+  SkipBack,
+  SkipForward,
+  Sparkles,
+  Square,
+  SquareSplitHorizontal,
+  Sun,
+  SwitchCamera,
+  Trash2,
+  Type,
+  Undo2,
+  Upload,
+  Video,
+  VideoOff,
+  Volume2,
+  VolumeX,
+  Download,
+  X,
+  ZoomIn,
+  type LucideIcon,
+  type LucideProps,
+} from 'lucide-react'
 
-const base = (props: SVGProps<SVGSVGElement>) => ({
-  width: 20,
-  height: 20,
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 1.8,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-  'aria-hidden': true,
-  ...props,
-})
+function wrap(C: LucideIcon, name: string) {
+  const Icon = (p: LucideProps) => <C size={20} strokeWidth={1.75} aria-hidden {...p} />
+  Icon.displayName = name
+  return Icon
+}
 
-type P = SVGProps<SVGSVGElement>
-export const IconScreen = (p: P) => (<svg {...base(p)}><rect x="2" y="4" width="20" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></svg>)
-export const IconCamera = (p: P) => (<svg {...base(p)}><path d="M15 10l5-3v10l-5-3z" /><rect x="2" y="6" width="13" height="12" rx="2" /></svg>)
-export const IconCameraOff = (p: P) => (<svg {...base(p)}><path d="M15 10l5-3v10l-5-3zM2 2l20 20M13 18H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1m4 0h4a2 2 0 0 1 2 2v4" /></svg>)
-export const IconMic = (p: P) => (<svg {...base(p)}><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4" /></svg>)
-export const IconMicOff = (p: P) => (<svg {...base(p)}><path d="M2 2l20 20M9 9v2a3 3 0 0 0 5.1 2.1M15 9.3V5a3 3 0 0 0-5.7-1.3M5 11a7 7 0 0 0 11.9 5M19 11a7 7 0 0 1-.7 3M12 18v4" /></svg>)
-export const IconScreenCam = (p: P) => (<svg {...base(p)}><rect x="2" y="4" width="20" height="13" rx="2" /><circle cx="17" cy="13" r="3" /><path d="M8 21h8" /></svg>)
-export const IconWave = (p: P) => (<svg {...base(p)}><path d="M2 12h2M6 8v8M10 4v16M14 7v10M18 10v4M22 12h0" /></svg>)
-export const IconPause = (p: P) => (<svg {...base(p)}><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>)
-export const IconChevronDown = (p: P) => (<svg {...base(p)}><path d="M6 9l6 6 6-6" /></svg>)
-export const IconCheck = (p: P) => (<svg {...base(p)}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>)
-export const IconPlay = (p: P) => (<svg {...base(p)}><path d="M7 4l13 8-13 8z" /></svg>)
-export const IconStop = (p: P) => (<svg {...base(p)}><rect x="6" y="6" width="12" height="12" rx="2" /></svg>)
-export const IconRestart = (p: P) => (<svg {...base(p)}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>)
-export const IconTrash = (p: P) => (<svg {...base(p)}><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>)
-export const IconPen = (p: P) => (<svg {...base(p)}><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>)
-export const IconPopout = (p: P) => (<svg {...base(p)}><rect x="3" y="3" width="18" height="18" rx="2" /><rect x="12" y="12" width="7" height="6" rx="1" /></svg>)
-export const IconDownload = (p: P) => (<svg {...base(p)}><path d="M12 3v12M7 10l5 5 5-5M4 21h16" /></svg>)
-export const IconFolder = (p: P) => (<svg {...base(p)}><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>)
-export const IconSave = (p: P) => (<svg {...base(p)}><path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M7 3v5h8M7 21v-7h10v7" /></svg>)
-export const IconImage = (p: P) => (<svg {...base(p)}><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>)
-export const IconScissors = (p: P) => (<svg {...base(p)}><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" /></svg>)
-export const IconLibrary = (p: P) => (<svg {...base(p)}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>)
-export const IconPlus = (p: P) => (<svg {...base(p)}><path d="M12 5v14M5 12h14" /></svg>)
-export const IconX = (p: P) => (<svg {...base(p)}><path d="M18 6L6 18M6 6l12 12" /></svg>)
-export const IconShape = (p: P) => (<svg {...base(p)}><circle cx="8" cy="8" r="5" /><rect x="11" y="11" width="10" height="10" rx="2" /></svg>)
-export const IconZoom = (p: P) => (<svg {...base(p)}><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3M11 8v6M8 11h6" /></svg>)
-export const IconSpotlight = (p: P) => (<svg {...base(p)}><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></svg>)
-export const IconClick = (p: P) => (<svg {...base(p)}><path d="M9 9l11 4-5 2-2 5z" /><path d="M7.2 2.2L8 5.1M5.1 8H2.2M14 4.1l-2.1 2.1M6.2 11.9l-2.1 2.1" /></svg>)
-export const IconSun = (p: P) => (<svg {...base(p)}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>)
-export const IconMoon = (p: P) => (<svg {...base(p)}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>)
-export const IconFlip = (p: P) => (<svg {...base(p)}><path d="M4 8V6a2 2 0 0 1 2-2h2l1.5-2h5L16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" /><path d="M8 12a4 4 0 0 1 7-2.6L16 11M16 12a4 4 0 0 1-7 2.6L8 13M16 8v3h-3M8 16v-3h3" /></svg>)
-export const IconVolume = (p: P) => (<svg {...base(p)}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></svg>)
-export const IconVolumeOff = (p: P) => (<svg {...base(p)}><path d="M4 9v6h4l5 4V5L8 9zM22 9.5l-5 5M17 9.5l5 5" /></svg>)
-export const IconFullscreen = (p: P) => (<svg {...base(p)}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>)
-export const IconFullscreenExit = (p: P) => (<svg {...base(p)}><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></svg>)
-const SkipLabel = () => (<text x="12" y="16.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor" stroke="none">5</text>)
-export const IconBack5 = (p: P) => (<svg {...base(p)}><path d="M4.5 9A8.5 8.5 0 1 1 3.5 12" /><path d="M4 4v5h5" /><SkipLabel /></svg>)
-export const IconForward5 = (p: P) => (<svg {...base(p)}><path d="M19.5 9A8.5 8.5 0 1 0 20.5 12" /><path d="M20 4v5h-5" /><SkipLabel /></svg>)
-export const IconResize = (p: P) => (<svg {...base(p)}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>)
+export const IconScreen = wrap(Monitor, 'IconScreen')
+export const IconCamera = wrap(Video, 'IconCamera')
+export const IconCameraOff = wrap(VideoOff, 'IconCameraOff')
+export const IconMic = wrap(Mic, 'IconMic')
+export const IconMicOff = wrap(MicOff, 'IconMicOff')
+export const IconScreenCam = wrap(MonitorPlay, 'IconScreenCam')
+export const IconWave = wrap(AudioLines, 'IconWave')
+export const IconPause = wrap(Pause, 'IconPause')
+export const IconChevronDown = wrap(ChevronDown, 'IconChevronDown')
+export const IconCheck = wrap(Check, 'IconCheck')
+export const IconPlay = wrap(Play, 'IconPlay')
+export const IconStop = wrap(Square, 'IconStop')
+export const IconRestart = wrap(RotateCcw, 'IconRestart')
+export const IconTrash = wrap(Trash2, 'IconTrash')
+export const IconPen = wrap(PenLine, 'IconPen')
+export const IconPopout = wrap(PictureInPicture2, 'IconPopout')
+export const IconDownload = wrap(Download, 'IconDownload')
+export const IconFolder = wrap(Folder, 'IconFolder')
+export const IconSave = wrap(Save, 'IconSave')
+export const IconImage = wrap(Image, 'IconImage')
+export const IconScissors = wrap(Scissors, 'IconScissors')
+export const IconLibrary = wrap(LayoutGrid, 'IconLibrary')
+export const IconPlus = wrap(Plus, 'IconPlus')
+export const IconX = wrap(X, 'IconX')
+export const IconShape = wrap(Shapes, 'IconShape')
+export const IconZoom = wrap(ZoomIn, 'IconZoom')
+export const IconSpotlight = wrap(Focus, 'IconSpotlight')
+export const IconClick = wrap(MousePointerClick, 'IconClick')
+export const IconSun = wrap(Sun, 'IconSun')
+export const IconMoon = wrap(Moon, 'IconMoon')
+export const IconFlip = wrap(SwitchCamera, 'IconFlip')
+export const IconVolume = wrap(Volume2, 'IconVolume')
+export const IconVolumeOff = wrap(VolumeX, 'IconVolumeOff')
+export const IconFullscreen = wrap(Maximize, 'IconFullscreen')
+export const IconFullscreenExit = wrap(Minimize, 'IconFullscreenExit')
+export const IconBack5 = wrap(Rewind, 'IconBack5')
+export const IconForward5 = wrap(FastForward, 'IconForward5')
+export const IconResize = wrap(Scaling, 'IconResize')
+export const IconObjects = wrap(ScanSearch, 'IconObjects')
+export const IconEdit = wrap(Clapperboard, 'IconEdit')
+export const IconSplit = wrap(SquareSplitHorizontal, 'IconSplit')
+export const IconUndo = wrap(Undo2, 'IconUndo')
+export const IconRedo = wrap(Redo2, 'IconRedo')
+export const IconText = wrap(Type, 'IconText')
+export const IconMagic = wrap(Sparkles, 'IconMagic')
+export const IconLayers = wrap(Layers, 'IconLayers')
+export const IconExport = wrap(Upload, 'IconExport')
+export const IconSkipStart = wrap(SkipBack, 'IconSkipStart')
+export const IconSkipEnd = wrap(SkipForward, 'IconSkipEnd')
+export const IconPalette = wrap(Palette, 'IconPalette')
+export const IconTransition = wrap(Blend, 'IconTransition')

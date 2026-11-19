@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { applyBackgroundBlur, describeMediaError, getCamera, getMic, isPhone, listDevices, stopStream, supportsBackgroundBlur, type DeviceLists } from '../lib/media'
+import { BackgroundProcessor, PRESET_BACKGROUNDS } from '../lib/background'
+import { getBackground } from '../lib/backgroundStore'
+import { ObjectProcessor, type ObjectSummary } from '../lib/objects'
+import { applyBackgroundBlur, describeMediaError, getCamera, getMic, isMirrored, isPhone, listDevices, stopStream, supportsBackgroundBlur, type DeviceLists } from '../lib/media'
 import { usesCamera, type Settings } from '../lib/settings'
 
 /** Keeps live camera and mic streams that match the current settings. Shared by setup preview and recording. */
@@ -49,6 +52,79 @@ export function useMediaSources(s: Settings) {
     if (camStream) void applyBackgroundBlur(camStream, s.backgroundBlur)
   }, [camStream, s.backgroundBlur])
 
+  // Object detection (ml5.js): first stage after the raw camera, so removed objects are gone
+  // before the background effect runs.
+  const [objects, setObjects] = useState<ObjectProcessor | null>(null)
+  const [objectList, setObjectList] = useState<ObjectSummary[]>([])
+  const [objectStatus, setObjectStatus] = useState<'off' | 'loading' | 'ready' | 'error'>('off')
+  const objectsOn = wantCamera && s.objectDetection
+  useEffect(() => {
+    if (!camStream || !objectsOn) return
+    const p = new ObjectProcessor(camStream)
+    p.onObjects = setObjectList
+    p.onStatus = setObjectStatus
+    setObjects(p)
+    return () => {
+      p.destroy()
+      setObjects(null)
+      setObjectList([])
+      setObjectStatus('off')
+    }
+  }, [camStream, objectsOn])
+  useEffect(() => {
+    if (!objects) return
+    objects.removed = new Set(s.removedObjects)
+    objects.showLabels = s.showObjectLabels
+  }, [objects, s.removedObjects, s.showObjectLabels])
+  const afterObjects = objects?.stream ?? camStream
+
+  // Background blur / picture: the camera is passed through a processor and everything downstream
+  // (preview, bubble, floating window, recording) uses its output instead of the raw camera.
+  const [processor, setProcessor] = useState<BackgroundProcessor | null>(null)
+  const [backgroundError, setBackgroundError] = useState<string | null>(null)
+  const effectOn = wantCamera && s.cameraBackground !== 'none'
+  useEffect(() => {
+    if (!afterObjects || !effectOn) return
+    const p = new BackgroundProcessor(afterObjects)
+    setBackgroundError(null)
+    p.onError = () => setBackgroundError('Could not load the background effect. Check your internet connection, then pick the effect again.')
+    setProcessor(p)
+    return () => {
+      p.destroy()
+      setProcessor(null)
+    }
+  }, [afterObjects, effectOn])
+
+  const mirror = isMirrored(s)
+  useEffect(() => {
+    if (!processor) return
+    processor.mode = s.cameraBackground
+    processor.blur = s.backgroundBlurAmount
+    processor.mirror = mirror
+  }, [processor, s.cameraBackground, s.backgroundBlurAmount, mirror])
+
+  useEffect(() => {
+    if (!processor || s.cameraBackground !== 'image') return
+    const preset = PRESET_BACKGROUNDS.find((p) => p.id === s.backgroundImageId)
+    if (preset || !s.backgroundImageId) {
+      processor.setPreset(preset ?? PRESET_BACKGROUNDS[0])
+      return
+    }
+    let cancelled = false
+    void getBackground(s.backgroundImageId)
+      .then((bg) => (bg ? createImageBitmap(bg.blob) : null))
+      .then((bmp) => {
+        if (cancelled) return bmp?.close()
+        // The processor owns the picture from here and releases it when it's replaced.
+        if (bmp) processor.setImage(bmp, bmp.width, bmp.height)
+        else processor.setPreset(PRESET_BACKGROUNDS[0])
+      })
+      .catch(() => !cancelled && processor.setPreset(PRESET_BACKGROUNDS[0]))
+    return () => {
+      cancelled = true
+    }
+  }, [processor, s.cameraBackground, s.backgroundImageId])
+
   useEffect(() => {
     if (!s.micEnabled) return
     let cancelled = false
@@ -72,9 +148,13 @@ export function useMediaSources(s: Settings) {
 
   return {
     devices,
-    camStream: wantCamera ? camStream : null,
+    camStream: wantCamera ? (processor?.stream ?? afterObjects) : null,
+    /** Kinds of objects in view right now, while object detection is on. */
+    objectList: objectsOn ? objectList : [],
+    objectStatus: objectsOn ? objectStatus : ('off' as const),
     micStream: s.micEnabled ? micStream : null,
     camError: wantCamera ? camError : null,
+    backgroundError: effectOn ? backgroundError : null,
     micError: s.micEnabled ? micError : null,
     blurSupported: supportsBackgroundBlur(camStream),
     // Camera names are hidden until permission is granted, so only a known single camera rules it out.

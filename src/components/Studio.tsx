@@ -9,6 +9,8 @@ import { isMirrored } from '../lib/media'
 import { extensionFor, pickMimeType, Recorder, videoBitrate, type RecordingResult } from '../lib/recorder'
 import { clickEffectLabels, usesCamera, usesScreen, type BubbleShape, type ClickEffect, type Mode, type Settings } from '../lib/settings'
 import { BubbleOverlay } from './BubbleOverlay'
+import { ObjectControls } from './ObjectControls'
+import type { ObjectSummary } from '../lib/objects'
 import {
   IconCamera,
   IconCameraOff,
@@ -16,6 +18,7 @@ import {
   IconFlip,
   IconMic,
   IconMicOff,
+  IconObjects,
   IconPause,
   IconPen,
   IconPlay,
@@ -45,12 +48,14 @@ interface Props {
   camStream: MediaStream | null
   micStream: MediaStream | null
   canFlip: boolean
+  objectList: ObjectSummary[]
+  objectStatus: 'off' | 'loading' | 'ready' | 'error'
   initialPip: Window | null
   onFinished: (r: FinishedRecording) => void
   onCancel: () => void
 }
 
-const PEN_COLORS = ['#ff8080', '#ffffff', '#facc15', '#22c55e', '#0ea5e9']
+const PEN_COLORS = ['#2f6fe4', '#ef4b4b', '#ffffff', '#facc15', '#22c55e', '#0ea5e9']
 const SHAPES: BubbleShape[] = ['circle', 'rounded', 'square']
 const CLICK_TOOLS: { effect: ClickEffect; icon: typeof IconZoom }[] = [
   { effect: 'zoom', icon: IconZoom },
@@ -66,7 +71,7 @@ function relativePoint(e: PointerEvent<HTMLElement>) {
   return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
 }
 
-export function Studio({ settings: s, update, screenStream, camStream, micStream, canFlip, initialPip, onFinished, onCancel }: Props) {
+export function Studio({ settings: s, update, screenStream, camStream, micStream, canFlip, objectList, objectStatus, initialPip, onFinished, onCancel }: Props) {
   const toast = useToast()
   const isAudio = s.mode === 'audio'
   const [ready, setReady] = useState(false)
@@ -437,6 +442,12 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
       )}
 
       <div className="controlbar" role="toolbar" aria-label="Recording controls">
+        {usesCamera(s.mode) && s.objectDetection && (
+          <section className="object-panel" aria-label="Objects on camera">
+            <h3>Objects on camera</h3>
+            <ObjectControls settings={s} update={update} list={objectList} status={objectStatus} />
+          </section>
+        )}
         <div className="status">
           <span className={`rec-dot ${phase === 'recording' ? 'rec-dot-live' : ''}`} aria-hidden />
           <span className="status-text">{statusText}</span>
@@ -474,6 +485,18 @@ export function Studio({ settings: s, update, screenStream, camStream, micStream
           {usesCamera(s.mode) && canFlip && (
             <button type="button" className="icon-btn" onClick={() => update({ cameraFacing: s.cameraFacing === 'user' ? 'environment' : 'user' })} aria-label={s.cameraFacing === 'user' ? 'Switch to back camera' : 'Switch to front camera'} title="Switch camera">
               <IconFlip />
+            </button>
+          )}
+          {usesCamera(s.mode) && (
+            <button
+              type="button"
+              className={`icon-btn ${s.objectDetection ? 'icon-active' : ''}`}
+              onClick={() => update({ objectDetection: !s.objectDetection })}
+              aria-pressed={s.objectDetection}
+              aria-label={s.objectDetection ? 'Turn object detection off' : 'Turn object detection on'}
+              title="Find and remove objects on camera (ml5.js)"
+            >
+              <IconObjects />
             </button>
           )}
           {s.mode === 'screen-camera' && (

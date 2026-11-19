@@ -28,9 +28,76 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 // A worker-driven ticker keeps drawing at full rate while the tab is hidden
 // (requestAnimationFrame and main-thread timers are throttled in background tabs).
-const TICKER = `let id=null;onmessage=e=>{if(id)clearInterval(id);id=e.data>0?setInterval(()=>postMessage(0),e.data):null}`
+export const TICKER = `let id=null;onmessage=e=>{if(id)clearInterval(id);id=e.data>0?setInterval(()=>postMessage(0),e.data):null}`
 
-function makeVideo(stream: MediaStream): HTMLVideoElement {
+// MediaStreamTrackProcessor (Chrome/Edge) is not in TypeScript's DOM lib yet.
+type TrackProcessorCtor = new (init: { track: MediaStreamTrack; maxBufferSize?: number }) => {
+  readable: ReadableStream<VideoFrame>
+}
+const TrackProcessor = (globalThis as { MediaStreamTrackProcessor?: TrackProcessorCtor }).MediaStreamTrackProcessor
+
+/**
+ * Keeps the newest frame of a video track, read straight from the track.
+ * On macOS, Chrome stops updating <video> elements while the window is minimized, hidden behind
+ * other apps or on another Space, which froze the recording. Track frames keep coming regardless.
+ */
+export class LiveFrames {
+  frame: VideoFrame | null = null
+  private track: MediaStreamTrack
+  private reader: ReadableStreamDefaultReader<VideoFrame>
+  private stopped = false
+
+  constructor(source: MediaStreamTrack) {
+    // A clone, so stopping it never ends the caller's track.
+    this.track = source.clone()
+    this.reader = new TrackProcessor!({ track: this.track, maxBufferSize: 1 }).readable.getReader()
+    void this.pump()
+  }
+
+  private async pump() {
+    try {
+      for (;;) {
+        const { value, done } = await this.reader.read()
+        if (done || this.stopped) {
+          value?.close()
+          break
+        }
+        this.frame?.close()
+        this.frame = value
+      }
+    } catch {
+      // Track ended; the last frame stays until stop().
+    }
+  }
+
+  stop() {
+    this.stopped = true
+    void this.reader.cancel().catch(() => {})
+    this.track.stop()
+    this.frame?.close()
+    this.frame = null
+  }
+}
+
+export function liveFrames(stream: MediaStream | null): LiveFrames | null {
+  const track = stream?.getVideoTracks()[0]
+  if (!TrackProcessor || !track) return null
+  try {
+    return new LiveFrames(track)
+  } catch {
+    return null
+  }
+}
+
+/** Something drawable with its size: the newest track frame when available, else the <video> element. */
+export function picture(video: HTMLVideoElement | null, live: LiveFrames | null): { img: CanvasImageSource; w: number; h: number } | null {
+  const f = live?.frame
+  if (f && f.displayWidth) return { img: f, w: f.displayWidth, h: f.displayHeight }
+  if (video && video.videoWidth) return { img: video, w: video.videoWidth, h: video.videoHeight }
+  return null
+}
+
+export function makeVideo(stream: MediaStream): HTMLVideoElement {
   const v = document.createElement('video')
   v.muted = true
   v.playsInline = true
@@ -62,6 +129,8 @@ export class Compositor {
   private ctx: CanvasRenderingContext2D
   private screen: HTMLVideoElement | null = null
   private camera: HTMLVideoElement | null = null
+  private screenLive: LiveFrames | null = null
+  private cameraLive: LiveFrames | null = null
   private worker: Worker | null = null
   private workerUrl: string | null = null
 
@@ -105,11 +174,15 @@ export class Compositor {
   setScreen(stream: MediaStream | null) {
     this.screen?.pause()
     this.screen = stream ? makeVideo(stream) : null
+    this.screenLive?.stop()
+    this.screenLive = liveFrames(stream)
   }
 
   setCamera(stream: MediaStream | null) {
     this.camera?.pause()
     this.camera = stream ? makeVideo(stream) : null
+    this.cameraLive?.stop()
+    this.cameraLive = liveFrames(stream)
   }
 
   start(fps: number) {
@@ -206,15 +279,15 @@ export class Compositor {
     ctx.save()
     ctx.scale(s, s)
     ctx.translate(-x0 * W, -y0 * H)
-    const screen = this.screen
-    if (screen && screen.videoWidth) {
+    const screen = picture(this.screen, this.screenLive)
+    if (screen) {
       // Contain-fit so window resizes or surface switches never distort the capture.
-      const f = Math.min(W / screen.videoWidth, H / screen.videoHeight)
-      const w = screen.videoWidth * f
-      const h = screen.videoHeight * f
+      const f = Math.min(W / screen.w, H / screen.h)
+      const w = screen.w * f
+      const h = screen.h * f
       ctx.imageSmoothingQuality = 'high'
-      ctx.drawImage(screen, (W - w) / 2, (H - h) / 2, w, h)
-    } else if (!screen && this.camera) {
+      ctx.drawImage(screen.img, (W - w) / 2, (H - h) / 2, w, h)
+    } else if (!this.screen && this.camera) {
       if (this.cameraVisible) this.drawCameraFull()
       else this.drawPlaceholder('Camera off')
     }
@@ -222,7 +295,7 @@ export class Compositor {
 
     this.drawSpotlight()
     this.drawRipples(now)
-    if (screen?.videoWidth && this.camera && this.cameraVisible && this.drawBubble) this.drawCameraBubble()
+    if (screen && this.camera && this.cameraVisible && this.drawBubble) this.drawCameraBubble()
     this.drawStrokes()
   }
 
@@ -239,7 +312,7 @@ export class Compositor {
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
     ctx.fill('evenodd')
     ctx.lineWidth = Math.max(2, this.height / 300)
-    ctx.strokeStyle = 'rgba(255, 128, 128, 0.9)'
+    ctx.strokeStyle = 'rgba(47, 111, 228, 0.9)'
     ctx.beginPath()
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2)
     ctx.stroke()
@@ -254,12 +327,12 @@ export class Compositor {
       const base = this.height * 0.025
       ctx.save()
       ctx.globalAlpha = 1 - t
-      ctx.fillStyle = 'rgba(255, 128, 128, 0.35)'
+      ctx.fillStyle = 'rgba(47, 111, 228, 0.3)'
       ctx.beginPath()
       ctx.arc(c.x, c.y, base * (1 + t), 0, Math.PI * 2)
       ctx.fill()
       ctx.lineWidth = Math.max(2, this.height / 250)
-      ctx.strokeStyle = '#ff8080'
+      ctx.strokeStyle = '#2f6fe4'
       ctx.beginPath()
       ctx.arc(c.x, c.y, base * (1 + t * 2.5), 0, Math.PI * 2)
       ctx.stroke()
@@ -268,26 +341,26 @@ export class Compositor {
   }
 
   private drawCameraFull() {
-    const cam = this.camera!
-    if (!cam.videoWidth) return
+    const cam = picture(this.camera, this.cameraLive)
+    if (!cam) return
     const { ctx } = this
     const W = this.width
     const H = this.height
-    const s = Math.max(W / cam.videoWidth, H / cam.videoHeight) * this.cameraZoom
-    const w = cam.videoWidth * s
-    const h = cam.videoHeight * s
+    const s = Math.max(W / cam.w, H / cam.h) * this.cameraZoom
+    const w = cam.w * s
+    const h = cam.h * s
     ctx.save()
     if (this.mirror) {
       ctx.translate(W, 0)
       ctx.scale(-1, 1)
     }
-    ctx.drawImage(cam, (W - w) / 2, (H - h) / 2, w, h)
+    ctx.drawImage(cam.img, (W - w) / 2, (H - h) / 2, w, h)
     ctx.restore()
   }
 
   private drawCameraBubble() {
-    const cam = this.camera!
-    if (!cam.videoWidth) return
+    const cam = picture(this.camera, this.cameraLive)
+    if (!cam) return
     const { ctx } = this
     const l = clampLayout(this.layout, this.aspect)
     const d = l.size * this.height
@@ -306,10 +379,10 @@ export class Compositor {
     ctx.save()
     bubblePath(ctx, this.shape, x, y, d)
     ctx.clip()
-    const side = Math.min(cam.videoWidth, cam.videoHeight)
+    const side = Math.min(cam.w, cam.h)
     const f = (d * this.cameraZoom) / side
-    const w = cam.videoWidth * f
-    const h = cam.videoHeight * f
+    const w = cam.w * f
+    const h = cam.h * f
     ctx.translate(x, y)
     if (this.mirror) {
       ctx.translate(d, 0)
@@ -317,11 +390,11 @@ export class Compositor {
     }
     if (this.cameraZoom < 1) {
       this.frost.width = this.frost.height = FROST_SIZE
-      this.frost.getContext('2d')!.drawImage(cam, (cam.videoWidth - side) / 2, (cam.videoHeight - side) / 2, side, side, 0, 0, FROST_SIZE, FROST_SIZE)
+      this.frost.getContext('2d')!.drawImage(cam.img, (cam.w - side) / 2, (cam.h - side) / 2, side, side, 0, 0, FROST_SIZE, FROST_SIZE)
       ctx.imageSmoothingQuality = 'high'
       ctx.drawImage(this.frost, 0, 0, d, d)
     }
-    ctx.drawImage(cam, (d - w) / 2, (d - h) / 2, w, h)
+    ctx.drawImage(cam.img, (d - w) / 2, (d - h) / 2, w, h)
     ctx.restore()
 
     // Glass: a diagonal sheen and a thin bright rim.

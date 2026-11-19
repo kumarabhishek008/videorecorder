@@ -1,0 +1,15 @@
+node_modules
+.next
+dist
+out
+.git
+.gitignore
+.DS_Store
+*.log
+*.local
+*.tsbuildinfo
+next-env.d.ts
+public/mediapipe
+Dockerfile
+.dockerignore
+.claude

@@ -6,6 +6,8 @@ export type Format = 'webm' | 'mp4'
 export type CursorMode = 'always' | 'motion' | 'never'
 export type ClickEffect = 'zoom' | 'spotlight' | 'highlight' | 'off'
 export type CameraFacing = 'user' | 'environment'
+export type CameraBackground = 'none' | 'blur' | 'image'
+export type BackgroundBlur = 'light' | 'medium' | 'strong'
 
 export interface Settings {
   mode: Mode
@@ -28,6 +30,16 @@ export interface Settings {
   cameraResolution: '720' | '1080'
   mirrorCamera: boolean
   backgroundBlur: boolean
+  /** Background effect drawn by the app itself; works with any camera. */
+  cameraBackground: CameraBackground
+  backgroundBlurAmount: BackgroundBlur
+  /** A built-in preset ('preset:…') or the id of an uploaded picture. */
+  backgroundImageId: string
+  /** Live object detection on the camera (ml5.js). */
+  objectDetection: boolean
+  /** Object kinds painted out of the camera video, e.g. "cup". */
+  removedObjects: string[]
+  showObjectLabels: boolean
   cameraZoom: number
   bubbleShape: BubbleShape
   cursor: CursorMode
@@ -60,6 +72,12 @@ export const defaultSettings: Settings = {
   cameraResolution: '720',
   mirrorCamera: true,
   backgroundBlur: false,
+  cameraBackground: 'none',
+  backgroundBlurAmount: 'medium',
+  backgroundImageId: 'preset:sky',
+  objectDetection: false,
+  removedObjects: [],
+  showObjectLabels: false,
   cameraZoom: 0.75,
   bubbleShape: 'circle',
   cursor: 'always',

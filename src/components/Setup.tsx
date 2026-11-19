@@ -6,7 +6,9 @@ import { canCaptureScreen, isMirrored, isPhone } from '../lib/media'
 import { supportedFormats } from '../lib/recorder'
 import { clickEffectLabels, modeLabels, usesCamera, usesScreen, type ClickEffect, type Mode, type Settings } from '../lib/settings'
 import { IconCamera, IconFlip, IconFolder, IconMic, IconMicOff, IconScreen, IconScreenCam, IconWave, IconZoom } from './Icons'
+import { BackgroundPicker } from './BackgroundPicker'
 import { GlassCamera } from './GlassCamera'
+import { ObjectControls } from './ObjectControls'
 import { LevelBar } from './LevelBar'
 import { Select } from './Select'
 
@@ -214,6 +216,37 @@ export function Setup({ settings: s, update, resetSettings, sources, starting, e
               {(!isPhone || s.cameraFacing === 'user') && <Toggle label="Mirror" checked={s.mirrorCamera} onChange={(v) => update({ mirrorCamera: v })} compact />}
               {sources.blurSupported && <Toggle label="Blur background" checked={s.backgroundBlur} onChange={(v) => update({ backgroundBlur: v })} compact />}
             </div>
+            <Segmented
+              label="Background"
+              value={s.cameraBackground}
+              options={[
+                ['none', 'None'],
+                ['blur', 'Blur'],
+                ['image', 'Picture'],
+              ]}
+              onChange={(v) => update({ cameraBackground: v })}
+            />
+            {s.cameraBackground === 'blur' && (
+              <Segmented
+                label="Blur strength"
+                value={s.backgroundBlurAmount}
+                options={[
+                  ['light', 'Light'],
+                  ['medium', 'Medium'],
+                  ['strong', 'Strong'],
+                ]}
+                onChange={(v) => update({ backgroundBlurAmount: v })}
+              />
+            )}
+            {s.cameraBackground === 'image' && <BackgroundPicker value={s.backgroundImageId} onChange={(id) => update({ backgroundImageId: id })} />}
+            {sources.backgroundError && <p className="error-text">{sources.backgroundError}</p>}
+            <Toggle
+              label="Find & remove objects (ml5.js)"
+              hint="Spots everyday objects on camera, like a cup, phone or bottle, and can paint the ones you pick out of the video while you record."
+              checked={s.objectDetection}
+              onChange={(v) => update({ objectDetection: v })}
+            />
+            {s.objectDetection && <ObjectControls settings={s} update={update} list={sources.objectList} status={sources.objectStatus} />}
             {s.mode === 'screen-camera' && (
               <>
                 <Segmented
