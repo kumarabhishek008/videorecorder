@@ -7,3 +7,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# Run Netlify's Next.js adapter even if the site was first set up as a plain static (Vite) site.
+# Without it Netlify uploads .next as static files, which has no index.html, so "/" is a 404.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
